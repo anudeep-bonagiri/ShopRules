@@ -16,12 +16,14 @@ Built for the Nebius x NVIDIA Global AI Hackathon, Personal AI track. Every deci
 4. **Decide.** Nemotron 3 Ultra reads the product profile, the rule, your standing instructions, and the source excerpts, and decides: does this touch the product, how severe, effective when, and what to do (reprice with the price that keeps your margin, a compliance step, a tax registration, or a review).
 5. **Verify.** A verifier outside the model checks every claim's quote against the extracted text. Claims whose quote is not in the source are rejected and shown as rejected. An alert only exists when at least one claim is backed.
 6. **Act and learn.** Approve the step or dismiss the alert with a reason. The reason becomes a standing instruction (written by Nano) that future checks follow. A cost receipt shows which model did what and what sending everything to Ultra would have cost.
+7. **Forge a check as code.** For any rule, Rule Forge has Nemotron 3 Ultra write a short Python extractor for the one fact the rule is about, Nemotron 3 Nano write tests from the facts the verifier already backed, and a Nebius Token Factory Sandbox run them with networking off. Ultra revises on failure, up to three times. The forge page shows every step, the code, the tests, and the sandbox output.
 
 ## Stack
 
 | Piece | Choice |
 |---|---|
-| Models | NVIDIA Nemotron 3 Nano (extraction, classification, competitor parsing, skills) and Nemotron 3 Ultra (rule decisions) on Nebius Token Factory, OpenAI-compatible API with JSON schema output |
+| Models | NVIDIA Nemotron 3 Nano (extraction, classification, competitor parsing, skills, tests) and Nemotron 3 Ultra (rule decisions, check code) on Nebius Token Factory, OpenAI-compatible API with JSON schema output, thinking off for structured calls |
+| Code execution | Nebius Token Factory Sandboxes (Contree REST): disposable containers, networking off, for the checks Rule Forge writes |
 | Web access | Tavily Search (advanced depth, domain filters, chunks per source) and Tavily Extract (query-focused chunks); keyless mode as the fallback so a demo never dies on a missing key |
 | App | Next.js 14, React 18, `@shopify/polaris` 13 |
 | Storage | Vercel Blob, one private JSON document per workspace with ETag preconditions; a Postgres schema is included for self-hosting |
@@ -43,6 +45,7 @@ cp apps/web/.env.example apps/web/.env.local
 Fill in `apps/web/.env.local`:
 
 - `NEBIUS_API_KEY`: from [tokenfactory.nebius.com](https://tokenfactory.nebius.com). Hackathon code `NEBIUS-DEVPOST-GLOBAL26` adds credits.
+- `NEBIUS_PROJECT_ID`: the Token Factory project id (Project settings). Needed for Rule Forge's sandbox runs; without it the forge still writes the code and tests and is labelled "Not run".
 - `TAVILY_API_KEY`: optional. Without it, Search and Extract run in Tavily's free keyless mode.
 - `BLOB_READ_WRITE_TOKEN`: create a store with `vercel blob create-store shop-rules --access private` and run `vercel env pull`, or paste a token from the Vercel dashboard.
 - `CRON_SECRET`: any random string.
@@ -90,11 +93,20 @@ apps/web/              Next.js app (Polaris UI, API routes, pipeline)
   src/lib/pipeline.ts  ingest, rule checks, compare, skills, Telegram
   src/lib/verifier.ts  quote-in-source verifier
   src/lib/rules-catalog.ts  rule families, official domains, state nexus seeds
-  src/lib/db.ts        Vercel Blob workspace store
+  src/lib/db.ts        Vercel Blob workspace store (immutable versions)
+  src/lib/forge.ts     Rule Forge: write, test, run, revise
+  src/lib/sandbox.ts   Token Factory Sandboxes client
   supabase/migration.sql    equivalent Postgres schema for self-hosting
-extension/             Chrome extension (MV3)
-docs/                  research: past Tavily prize winners, competitor teardown, API
+extension/             Chrome extension (MV3); shop-rules-extension.zip is the packaged build
+scripts/facts.mts      one measured live cycle, writes docs/FACTS.md
+docs/                  FACTS, not-built, CLAIMS_AUDIT, JUDGE_QA, DECISIONS, PROJECT_STATUS, VIDEO,
+                       DEVPOST_FULL, api, competitors (REA teardown), design (token sheet and screens),
+                       tavily-personal-ai-research (past Tavily prize winners and judge quotes)
 ```
+
+## What is real and what is not
+
+Everything on the public demo is a live call: Tavily, Nemotron on Token Factory, and the sandbox when `NEBIUS_PROJECT_ID` is set. Nothing is replayed. The measured numbers are in [docs/FACTS.md](docs/FACTS.md), what is not built is in [docs/not-built.md](docs/not-built.md), and every claim this README makes is audited in [docs/CLAIMS_AUDIT.md](docs/CLAIMS_AUDIT.md).
 
 ## What is honest about this build
 

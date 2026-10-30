@@ -2,7 +2,7 @@
 import { send } from "./bridge";
 import type { AlertsResponse, HealthResponse, Settings } from "./types";
 
-const DEFAULT_BASE_URL = "http://localhost:3000";
+const DEFAULT_BASE_URL = "https://shop-rules.vercel.app";
 const BUILT_IN_HOSTS = /(^|\.)(amazon\.com|etsy\.com|myshopify\.com)$/i;
 
 function el<T extends HTMLElement>(id: string): T {

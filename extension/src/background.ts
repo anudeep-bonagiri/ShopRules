@@ -11,7 +11,7 @@ import type {
   TabMessage,
 } from "./types";
 
-const DEFAULT_BASE_URL = "http://localhost:3000";
+const DEFAULT_BASE_URL = "https://shop-rules.vercel.app";
 const POLL_ALARM = "shop-rules-poll-alerts";
 const POLL_MINUTES = 15;
 const BADGE_COLOR = "#008060";
