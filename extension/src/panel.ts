@@ -5,8 +5,10 @@
 // rules that touch this product, top alert, compare, footer.
 import { canonicalProductUrl } from "./extract";
 import { pricingInputs, reprice, type PricingResult } from "../../apps/web/src/lib/pricing";
+import { dutyExposure, stackedRateLabel } from "../../apps/web/src/lib/duty-exposure";
 import { deltaSummary, filterRange, fmtDelta, sparklinePath, toChartPoints, type ChartPoint } from "../../apps/web/src/lib/chart";
 import type {
+  AlertStatusResponse,
   AccountResponse,
   AccountSettings,
   Alert,
@@ -56,6 +58,9 @@ interface PanelState {
   ingestRun: RunResponse["run"] | null;
   dismissOpen: boolean;
   dismissReason: string;
+  /** Offered after a dismissal: siblings the same reason covers. */
+  similar: Array<{ id: string; headline: string; product_title: string | null }>;
+  lastDismissedId: string | null;
 }
 
 // Margin view for the tiles and the alert card. Same math as the web app.
@@ -78,6 +83,7 @@ const HOST_ID = "shop-rules-host";
 const DEFAULT_UNIT_COST_PCT = 45;
 const DEFAULT_UNITS_PER_WEEK = 20;
 const MAX_COMPETITORS = 5;
+const COMPARE_MIN_SAMPLE = 3;
 const POLL_MS = 2000;
 
 const FAMILY_LABEL: Record<RuleFamily, string> = { tariff: "Tariffs", safety: "Safety", tax: "Sales tax", policy: "Policy" };
@@ -138,7 +144,7 @@ const STYLES = `
 .sr-headprice { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
 .sr-headprice__v { font-size: 20px; line-height: 24px; font-weight: 700; }
 .sr-watchrow { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-.sr-body { flex: 1; overflow-y: auto; padding: 12px 16px 0; }
+.sr-body { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 12px 16px 0; }
 .sr-card { background: var(--sr-surface); border: 1px solid var(--sr-border); border-radius: 8px; padding: 14px 16px; margin-bottom: 12px; }
 .sr-card--critical { border-left: 3px solid var(--sr-critical); }
 .sr-card--warning { border-left: 3px solid var(--sr-warning); }
@@ -400,11 +406,16 @@ function priceNote(s: PanelState): string | null {
   return null;
 }
 
+// Same order as the web app: severity, confirmed before unconfirmed, then safety,
+// tariff, price and policy, sales tax last.
+const FAMILY_RANK: Record<string, number> = { safety: 0, tariff: 1, policy: 2, tax: 3 };
+function alertRank(a: Alert): number {
+  return (SEVERITY_RANK[a.severity] ?? 3) * 100 + (a.relevance === "affects" ? 0 : 10) + (a.kind === "price" ? 2 : (FAMILY_RANK[a.family] ?? 4));
+}
+
 function openAlerts(detail: ProductDetailResponse | null): Alert[] {
   if (!detail) return [];
-  return detail.alerts
-    .filter((a) => a.status === "new")
-    .sort((a, b) => (SEVERITY_RANK[a.severity] ?? 3) - (SEVERITY_RANK[b.severity] ?? 3) || b.created_at.localeCompare(a.created_at));
+  return detail.alerts.filter((a) => a.status === "new").sort((a, b) => alertRank(a) - alertRank(b) || b.created_at.localeCompare(a.created_at));
 }
 
 function topAlert(detail: ProductDetailResponse | null): Alert | null {
@@ -548,13 +559,26 @@ function renderStats(s: PanelState): string {
     costTile = tile("Landed cost", money(eco.base, c), `<span class="sr-num">${esc(fmtPct(eco.marginPct))} margin</span> <span class="sr-muted">${esc(source)}</span>`, "", edit);
   }
 
-  // 3. Duty exposure: origin, catalog heading, open tariff points.
-  const origin = product?.profile?.origin_country;
-  const hts = product?.profile?.hts_candidates?.[0];
+  // 3. Duty exposure: the stacked rate from the layers on the product (general
+  // rate read from hts.usitc.gov, Section 301 seed, origin surcharge the seller
+  // set), or the open tariff alert's change when there is one.
+  const origin = product?.overrides?.origin_country ?? product?.profile?.origin_country;
+  const hts = product?.overrides?.hts_heading ? { code: product.overrides.hts_heading, description: product?.profile?.hts_candidates?.find((c) => c.code === product.overrides?.hts_heading)?.description ?? "" } : product?.profile?.hts_candidates?.[0];
   const pts = tariff?.impact?.tariff_rate_change_pct ?? null;
-  const dutyValue = pts != null ? `${pts > 0 ? "+" : ""}${pts} pts` : hts?.code ? `HS ${hts.code}` : origin ? (COUNTRY[origin.toUpperCase()] ?? origin) : "Unknown";
-  const rate = product?.duty_rate?.verified && product.duty_rate.general ? `general duty ${product.duty_rate.general} (hts.usitc.gov)` : null;
-  const dutyDelta = pts != null ? `${esc(hts?.code ? `HS ${hts.code}, ` : "")}${esc(origin ? (COUNTRY[origin.toUpperCase()] ?? origin) : "origin unknown")} <span class="sr-red">open tariff alert</span>${rate ? `, ${esc(rate)}` : ""}` : hts?.code ? `${esc(hts.description)}${origin ? `, from ${esc(COUNTRY[origin.toUpperCase()] ?? origin)}` : ", origin unknown"}${rate ? `, ${esc(rate)}` : ""}` : s.detail ? "Set the origin in Shop Rules to sharpen tariff checks" : "Classified when you watch it";
+  const exposure = product ? dutyExposure({ origin_country: origin ?? null, heading: hts?.code ?? null, duty_rate: product.duty_rate ?? null, surcharge_pct: product.overrides?.duty_surcharge_pct ?? null }) : null;
+  const originName = origin ? (COUNTRY[origin.toUpperCase()] ?? origin) : "origin unknown";
+  let dutyValue: string;
+  let dutyDelta: string;
+  if (pts != null) {
+    dutyValue = `${pts > 0 ? "+" : ""}${pts} pts`;
+    dutyDelta = `${esc(hts?.code ? `HS ${hts.code}, ` : "")}${esc(originName)} <span class="sr-red">open tariff alert</span>${exposure ? `, stacked ${esc(stackedRateLabel(exposure))}` : ""}`;
+  } else if (exposure && product) {
+    dutyValue = stackedRateLabel(exposure);
+    dutyDelta = `${esc(hts?.code ? `HS ${hts.code}, ` : "")}${esc(originName)}: ${esc(exposure.summary)}`;
+  } else {
+    dutyValue = hts?.code ? `HS ${hts.code}` : origin ? originName : "Unknown";
+    dutyDelta = s.detail ? "Set the origin in Shop Rules to sharpen tariff checks" : "Classified when you watch it";
+  }
   const dutyTile = tile("Duty exposure", dutyValue, dutyDelta, pts != null && pts > 0 ? "" : "");
 
   // 4. Weekly margin drag from the open tariff alert, at the seller's units per week.
@@ -609,8 +633,9 @@ function renderRules(s: PanelState): string {
     const total = run?.total ?? 0;
     const done = run?.done ?? 0;
     const pct = total ? Math.round((done / total) * 100) : 5;
-    const current = run?.current?.length ? Array.from(new Set(run.current)).join(", ") : "starting";
-    progress = `<div class="sr-progress" role="status" aria-live="polite">Checked ${done} of ${total || "?"}: ${esc(current)}<div class="sr-progress__bar"><div class="sr-progress__fill" style="width:${pct}%"></div></div><span>Unchanged sources skip the model. Rules run three at a time.</span></div>`;
+    const current = run?.current?.length ? Array.from(new Set(run.current)).join(", ") : null;
+    const headline = total ? `Checked ${done} of ${total}${current ? `: ${esc(current)}` : ""}` : "Starting the check, counting the rules that are due";
+    progress = `<div class="sr-progress" role="status" aria-live="polite">${headline}<div class="sr-progress__bar"><div class="sr-progress__fill" style="width:${pct}%"></div></div><span>Unchanged sources skip the model. Rules run three at a time.</span></div>`;
   }
   const button = `<button class="sr-btn sr-btn--secondary" data-action="check" ${s.busy ? "disabled" : ""}>${s.busy === "check" ? "Checking..." : due ? `Check now (${due} due)` : "Check now"}</button>`;
   return card(title, `${groups}${progress}<div style="margin-top:10px">${button}</div>`);
@@ -711,15 +736,18 @@ function renderCompare(s: PanelState): string {
   if (!s.compare && hasTitle) parts.push('<p class="sr-muted sr-small" style="margin-top:8px">Competitor median and where this listing sits. Results are kept for 24 hours per product.</p>');
   if (s.compareError) parts.push(`<div class="sr-banner sr-banner--critical" style="margin:10px 0 0"><p>${esc(s.compareError)}</p></div>`);
   if (s.compare) {
-    const position = POSITION[s.compare.price_position] ?? POSITION.unknown;
     const listings = s.compare.listings.filter((l) => canonicalProductUrl(l.url, s.marketplace) !== s.page.url);
     const priced = listings.map((l) => l.price).filter((p): p is number => typeof p === "number" && p > 0).sort((a, b) => a - b);
-    const median = priced.length ? (priced[Math.floor(priced.length / 2)] ?? null) : null;
+    const n = priced.length;
+    const median = n ? (n % 2 ? (priced[(n - 1) / 2] ?? null) : ((priced[n / 2 - 1] ?? 0) + (priced[n / 2] ?? 0)) / 2) : null;
     const mine = currentPrice(s);
     const c = currentCurrency(s);
-    const vs = median !== null && mine !== null ? `${esc(signedMoney(mine - median, c))} vs median ${esc(money(median, c))}` : s.compare.note;
+    // One competitor is an anecdote: no verdict under three priced listings, and the sample is always shown.
+    const enough = n >= COMPARE_MIN_SAMPLE;
+    const position = enough ? (POSITION[s.compare.price_position] ?? POSITION.unknown) : POSITION.unknown;
+    const vs = median !== null && mine !== null ? `${esc(signedMoney(mine - median, c))} vs median ${esc(money(median, c))}, n=${n}${enough ? "" : ` (need ${COMPARE_MIN_SAMPLE} for a verdict)`}` : esc(s.compare.note);
     const cachedNote = s.compare.cached && s.compare.cached_at ? `<span class="sr-muted sr-small">cached ${esc(timeAgo(s.compare.cached_at) ?? "")}</span>` : "";
-    parts.push(`<div class="sr-compare__head">${pill(position.tone, position.label)}<span class="sr-muted sr-small sr-num">${vs}</span>${cachedNote}</div>`);
+    parts.push(`<div class="sr-compare__head">${pill(position.tone, enough ? position.label : `${n} priced, no verdict`)}<span class="sr-muted sr-small sr-num">${vs}</span>${cachedNote}</div>`);
     const hidden = s.compare.listings.length - listings.length;
     const rows = listings.slice(0, MAX_COMPETITORS).map((l) => {
       const href = safeHref(l.url);
@@ -766,7 +794,8 @@ function renderBanners(s: PanelState): string {
     out.push(`<div class="sr-banner sr-banner--critical" role="alert"><p>${esc(s.actionError)}</p><button class="sr-btn sr-btn--secondary" data-action="dismiss">Dismiss</button></div>`);
   }
   if (s.notice) {
-    out.push(`<div class="sr-banner sr-banner--success" role="status"><p>${esc(s.notice)}</p><button class="sr-btn sr-btn--secondary" data-action="dismiss">Dismiss</button></div>`);
+    const also = s.similar.length ? `<button class="sr-btn sr-btn--primary" data-action="dismiss-similar" ${s.busy ? "disabled" : ""}>${s.busy === "dismiss" ? "..." : `Also dismiss ${s.similar.length} similar`}</button>` : "";
+    out.push(`<div class="sr-banner sr-banner--success" role="status"><p>${esc(s.notice)}</p>${also}<button class="sr-btn sr-btn--secondary" data-action="dismiss">Dismiss</button></div>`);
   }
   return out.join("");
 }
@@ -888,6 +917,8 @@ export class Panel {
       ingestRun: null,
       dismissOpen: false,
       dismissReason: "",
+      similar: [],
+      lastDismissedId: null,
     };
     this.render();
     const panel = this.panelEl;
@@ -1064,6 +1095,9 @@ export class Panel {
         break;
       case "dismiss-confirm":
         void this.dismiss();
+        break;
+      case "dismiss-similar":
+        void this.dismissSimilar();
         break;
       case "help":
         this.update({ showHelp: true });
@@ -1263,15 +1297,33 @@ export class Panel {
     }
     const seq = this.seq;
     this.update({ busy: "dismiss", actionError: null, notice: null });
-    const result = await this.send<{ skill?: { skill: string } | null }>({ type: "alertStatus", id: alert.id, status: "dismissed", reason });
+    const result = await this.send<AlertStatusResponse>({ type: "alertStatus", id: alert.id, status: "dismissed", reason });
     if (!this.current(seq)) return;
     if (!result.ok) {
       this.update({ busy: null, actionError: result.error });
       return;
     }
-    const skill = result.data?.skill?.skill;
-    this.update({ busy: null, dismissOpen: false, dismissReason: "", notice: skill ? `Dismissed. Standing instruction saved: "${skill}"` : "Dismissed." });
+    const skill = result.data?.skill?.text;
+    const similar = result.data?.similar ?? [];
+    const siblings = similar.length ? ` ${similar.length} similar open alert${similar.length === 1 ? "" : "s"}: ${similar.slice(0, 2).map((x) => (x.product_title ? `${x.product_title}, ${x.headline}` : x.headline)).join("; ")}${similar.length > 2 ? "; and more" : ""}.` : "";
+    this.update({ busy: null, dismissOpen: false, dismissReason: "", similar, lastDismissedId: alert.id, notice: `${skill ? `Dismissed. Standing instruction saved: "${skill}"` : "Dismissed."}${siblings}` });
     await this.loadDetail(seq, alert.product_id);
+  }
+
+  private async dismissSimilar(): Promise<void> {
+    const s = this.state;
+    if (!s || s.busy || !s.similar.length || !s.lastDismissedId) return;
+    const seq = this.seq;
+    this.update({ busy: "dismiss", actionError: null });
+    const result = await this.send<AlertStatusResponse>({ type: "alertStatus", id: s.lastDismissedId, status: "dismissed", also_dismiss: s.similar.map((x) => x.id) });
+    if (!this.current(seq)) return;
+    if (!result.ok) {
+      this.update({ busy: null, actionError: result.error });
+      return;
+    }
+    const n = result.data?.also_dismissed ?? 0;
+    this.update({ busy: null, similar: [], notice: `Dismissed ${n} similar alert${n === 1 ? "" : "s"} with the same reason.` });
+    if (s.detail) await this.loadDetail(seq, s.detail.product.id);
   }
 
   private async saveUnitCost(): Promise<void> {

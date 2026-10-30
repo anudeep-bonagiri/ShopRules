@@ -22,9 +22,11 @@ export interface ProductOverrides {
   hts_detail?: string | null;
   for_children?: boolean | null;
   materials?: string[] | null;
+  /** Country-based duty surcharge the seller pays on this product, percent of customs value (duty-exposure.ts). */
+  duty_surcharge_pct?: number | null;
 }
 
-export const OVERRIDE_KEYS: Array<keyof ProductOverrides> = ["price_override", "unit_cost", "dutiable_share", "units_per_week", "origin_country", "hts_heading", "hts_detail", "for_children", "materials"];
+export const OVERRIDE_KEYS: Array<keyof ProductOverrides> = ["price_override", "unit_cost", "dutiable_share", "units_per_week", "origin_country", "hts_heading", "hts_detail", "for_children", "materials", "duty_surcharge_pct"];
 
 export interface ProductLike {
   price: number | null;
@@ -99,6 +101,7 @@ export function sanitizeOverrides(body: unknown): { patch: Partial<ProductOverri
   num("unit_cost", 0, 1_000_000);
   num("dutiable_share", 0, 1);
   num("units_per_week", 0, 100_000, true);
+  num("duty_surcharge_pct", 0, 200);
   if ("origin_country" in b) {
     const v = b.origin_country;
     if (v === null || v === "") patch.origin_country = null;

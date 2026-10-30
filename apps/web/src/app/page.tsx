@@ -6,6 +6,9 @@ import { useMemo, useState } from "react";
 import { api, timeAgo, useApi } from "@/lib/client";
 import type { AccountRow, AlertRow, ForgeRow, ProductRow, RuleRow } from "@/lib/db";
 import { nexusProgress, nexusSeed } from "@/lib/nexus";
+import { dutyExposure, dutyPerUnit } from "@/lib/duty-exposure";
+import { effectiveProfile, pricingProduct } from "@/lib/product";
+import { DEFAULT_DUTIABLE_SHARE, DEFAULT_UNITS_PER_WEEK, landedCostFor } from "@/lib/pricing";
 import type { NexusVerification } from "@/lib/nexus-crawl";
 import {
   alertEconomics,
@@ -81,6 +84,20 @@ export default function WatchlistPage() {
   const dragOpen = openAlerts.reduce((s, a) => s + weeklyDrag(alertEconomics(a, productMap.get(a.product_id), settings)), 0);
   const protectedSum = allAlerts.filter((a) => a.status === "actioned").reduce((s, a) => s + weeklyDrag(alertEconomics(a, productMap.get(a.product_id), settings)), 0);
   const highCount = openAlerts.filter((a) => a.severity === "high").length;
+  // Stacked duties already inside the landed cost of every imported product, per
+  // week: the general rate read from the schedule plus the seed and set layers.
+  const exposure = productList.reduce(
+    (acc, p) => {
+      const profile = effectiveProfile(p);
+      const e = dutyExposure({ origin_country: profile.origin_country, heading: profile.hts_candidates?.[0]?.code ?? null, duty_rate: p.duty_rate ?? null, surcharge_pct: p.overrides?.duty_surcharge_pct ?? null });
+      const pp = pricingProduct(p);
+      const landed = landedCostFor(pp, settings);
+      if (landed == null || e.known_pct <= 0) return acc;
+      const weekly = dutyPerUnit(e, landed, pp.dutiable_share ?? settings?.dutiable_share ?? DEFAULT_DUTIABLE_SHARE) * (pp.units_per_week ?? settings?.units_per_week ?? DEFAULT_UNITS_PER_WEEK);
+      return { weekly: acc.weekly + weekly, products: acc.products + 1, seeds: acc.seeds || e.layers.some((l) => l.status === "seed") };
+    },
+    { weekly: 0, products: 0, seeds: false },
+  );
   const counts: Record<Family, number> = {
     all: openAlerts.length,
     tariff: openAlerts.filter((a) => a.family === "tariff").length,
@@ -129,8 +146,13 @@ export default function WatchlistPage() {
       .filter((r) => r.family === "tax" && r.state === code)
       .sort((a, b) => (b.last_run_at ?? "").localeCompare(a.last_run_at ?? ""))[0] ?? null;
     const ruleIds = new Set(ruleList.filter((r) => r.family === "tax" && r.state === code).map((r) => r.id));
+    // Only a quote from the state's own revenue site can mark a threshold verified; a consultancy page never does.
+    const onRevenueSite = (a: AlertRow) => {
+      const dom = sourceDomain(a);
+      return Boolean(dom && seed && (dom === seed.dor_domain || dom.endsWith(`.${seed.dor_domain}`)));
+    };
     const verifiedAlert = allAlerts
-      .filter((a) => a.family === "tax" && ruleIds.has(a.rule_id) && a.impact?.nexus_verified && a.impact.nexus && (a.impact.nexus.dollars != null || a.impact.nexus.transactions != null))
+      .filter((a) => a.family === "tax" && ruleIds.has(a.rule_id) && a.impact?.nexus_verified && a.impact.nexus && (a.impact.nexus.dollars != null || a.impact.nexus.transactions != null) && onRevenueSite(a))
       .sort((a, b) => b.created_at.localeCompare(a.created_at))[0] ?? null;
     // Best source first: a threshold Tavily read on the revenue site itself, then a verifier-backed alert, then the seed.
     const crawl = nexusApi.data?.verifications[code];
@@ -226,6 +248,8 @@ export default function WatchlistPage() {
         <MetricCard label="Needs action" value={alerts.data ? openAlerts.length : "..."} tone={openAlerts.length > 0 ? "critical" : "neutral"} delta={openAlerts.length > 0 ? `${highCount} high priority` : "Nothing waiting"} />
         {dragOpen > 0 ? (
           <MetricCard label="At stake" value={`-${fmtShort(dragOpen)}`} tone="warning" delta="margin drag per week" />
+        ) : exposure.weekly > 0 ? (
+          <MetricCard label="Duty exposure" value={fmtShort(exposure.weekly)} tone="warning" delta={`per week in stacked duties, ${exposure.products} product${exposure.products === 1 ? "" : "s"}${exposure.seeds ? ", seeds included" : ""}`} />
         ) : (
           <MetricCard label="Protected" value={alerts.data ? `+${fmtShort(protectedSum)}` : "..."} tone="success" delta={protectedSum > 0 ? "per week, repriced" : "no margin at risk"} />
         )}

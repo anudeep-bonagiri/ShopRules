@@ -140,12 +140,23 @@ export function weeklyDrag(econ: Economics | null): number {
 }
 
 const SEVERITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
+// Within one severity: a confirmed match before an unconfirmed one, then safety
+// (a recall or a warning label) before tariff, price and policy, with sales-tax
+// review last. A nexus note never sits above a coin-battery alert on a kids' product.
+const FAMILY_RANK: Record<string, number> = { safety: 0, tariff: 1, policy: 2, tax: 3 };
+
+export function alertRank(a: Pick<AlertRow, "severity" | "relevance" | "family" | "kind">): number {
+  const sev = SEVERITY_RANK[a.severity] ?? 3;
+  const rel = a.relevance === "affects" ? 0 : 1;
+  const fam = a.kind === "price" ? 2 : (FAMILY_RANK[a.family] ?? 4);
+  return sev * 100 + rel * 10 + fam;
+}
 
 export function sortAlerts(alerts: AlertRow[], products: Map<string, ProductRow>, settings: Settings): AlertRow[] {
   const drag = new Map(alerts.map((a) => [a.id, weeklyDrag(alertEconomics(a, products.get(a.product_id), settings))]));
   return [...alerts].sort((a, b) => {
-    const s = (SEVERITY_RANK[a.severity] ?? 3) - (SEVERITY_RANK[b.severity] ?? 3);
-    if (s !== 0) return s;
+    const r = alertRank(a) - alertRank(b);
+    if (r !== 0) return r;
     const d = (drag.get(b.id) ?? 0) - (drag.get(a.id) ?? 0);
     if (d !== 0) return d;
     return b.created_at.localeCompare(a.created_at);

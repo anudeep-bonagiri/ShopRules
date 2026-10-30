@@ -11,6 +11,7 @@ import { countryName, FAMILY_LABEL } from "@/lib/rules-catalog";
 import { PriceChart } from "@/components/PriceChart";
 import { ForgeListRow, ForgeStepper, useForgeStageTimer } from "@/components/forge";
 import { SellerFields } from "@/components/SellerFields";
+import { DutyExposureCard } from "@/components/DutyExposure";
 import { StandingInstructions } from "@/components/StandingInstructions";
 import { effectivePrice, effectiveProfile, fieldSource, pricingProduct } from "@/lib/product";
 import {
@@ -71,6 +72,24 @@ export default function ProductInspectorPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [drafting, setDrafting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [pickingHts, setPickingHts] = useState<string | null>(null);
+
+  // The classifier and the catalog keywords disagreed: the seller picks, and the
+  // pick is an override the model never touches again.
+  async function pickHeading(code: string) {
+    if (!id) return;
+    setPickingHts(code);
+    setActionError(null);
+    try {
+      await api(`/api/products/${id}`, { method: "PATCH", json: { hts_heading: code } });
+      setNotice(`Heading set to HS ${code} for this product. Tariff rules reseeded and the duty rate re-read.`);
+      refresh();
+    } catch (e) {
+      setActionError((e as Error).message);
+    } finally {
+      setPickingHts(null);
+    }
+  }
 
   // Rule Forge: checks as code for one rule of this product.
   const forges = useApi<{ forges: ForgeRow[]; sandbox: { configured: boolean; image: string } }>(id ? `/api/forges?product_id=${id}` : null);
@@ -316,15 +335,25 @@ export default function ProductInspectorPage() {
                   <p className="sr-xs sr-num">
                     HS {hts.code}, {hts.description} ({Math.round(hts.confidence * 100)}% confidence)
                     {profile?.hts_detail ? `, suggested ${profile.hts_detail}, verify with a broker` : ""}
-                    {profile?.hts_guarded ? ". Heading set from the catalog, the classifier disagreed" : ""}
+                    {fieldSource(product, "hts_heading") === "product" ? ", set by you" : ""}
                   </p>
                 ) : null}
-                {product.duty_rate ? (
-                  <p className="sr-xs sr-num">
-                    {product.duty_rate.verified && product.duty_rate.general
-                      ? `General duty ${product.duty_rate.general}${product.duty_rate.special ? `, special ${product.duty_rate.special}` : ""}, ${product.duty_rate.label}`
-                      : `Official duty rate not read yet (${product.duty_rate.reason ?? "schedule page not parsed"}), ${product.duty_rate.label}`}
-                  </p>
+                {profile?.hts_guarded && fieldSource(product, "hts_heading") === "default" && (profile.hts_candidates?.length ?? 0) >= 2 ? (
+                  <div className="sr-stack" style={{ gap: 6 }}>
+                    <p className="sr-xs" style={{ margin: 0 }}>
+                      The classifier and the catalog keywords disagree on the heading. Pick the one that fits; it becomes your setting for this product.
+                    </p>
+                    <div className="sr-row sr-row--wrap" style={{ gap: 6 }}>
+                      {profile.hts_candidates.slice(0, 2).map((c) => (
+                        <SrButton key={c.code} onClick={() => void pickHeading(c.code)} loading={pickingHts === c.code} disabled={pickingHts != null}>
+                          {`Use ${c.code}, ${c.description}`}
+                        </SrButton>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {product.duty_rate && !(product.duty_rate.verified && product.duty_rate.general) ? (
+                  <p className="sr-xs sr-num">{`Official duty rate not read yet (${product.duty_rate.reason ?? "schedule page not parsed"}), ${product.duty_rate.label}`}</p>
                 ) : null}
               </div>
             </div>
@@ -360,6 +389,10 @@ export default function ProductInspectorPage() {
                 Workspace defaults
               </NextLink>
             </p>
+          </SrCard>
+
+          <SrCard style={{ order: 1 }}>
+            <DutyExposureCard product={product} settings={settings} />
           </SrCard>
 
           <SrCard style={{ order: 1 }}>

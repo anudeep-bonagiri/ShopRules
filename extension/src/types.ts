@@ -43,10 +43,10 @@ export interface Product {
   currency: string | null;
   image_url: string | null;
   profile: ProductProfile;
-  overrides?: { price_override?: number | null; unit_cost?: number | null; dutiable_share?: number | null; units_per_week?: number | null; origin_country?: string | null; hts_heading?: string | null; hts_detail?: string | null; for_children?: boolean | null; materials?: string[] | null } | null;
+  overrides?: { price_override?: number | null; unit_cost?: number | null; dutiable_share?: number | null; units_per_week?: number | null; origin_country?: string | null; hts_heading?: string | null; hts_detail?: string | null; for_children?: boolean | null; materials?: string[] | null; duty_surcharge_pct?: number | null } | null;
   created_at: string;
   last_checked_at: string | null;
-  duty_rate?: { general: string | null; general_pct: number | null; special?: string | null; verified: boolean; label: string; url?: string | null } | null;
+  duty_rate?: { general: string | null; general_pct: number | null; special?: string | null; verified: boolean; label: string; url?: string | null; read_at?: string } | null;
   open_alerts?: number;
 }
 
@@ -123,8 +123,12 @@ export interface PricePoint {
   source: "listing" | "extension" | "check" | "refresh" | "reprice" | string;
 }
 
+// A standing instruction row as the API returns it: the seller's own words in
+// text, the model's short rewrite beside it when it was usable.
 export interface Skill {
-  skill: string;
+  id?: string;
+  text: string;
+  rewrite?: string | null;
   scope: "product" | "family" | "account";
 }
 
@@ -161,7 +165,10 @@ export interface AccountResponse {
 
 export interface AlertStatusResponse {
   alert: Alert;
-  skill?: Skill;
+  skill?: Skill | null;
+  /** Other open alerts the same reason probably covers, offered as "also dismiss". */
+  similar?: Array<{ id: string; headline: string; product_title: string | null }>;
+  also_dismissed?: number;
 }
 
 export interface HealthResponse {
@@ -239,6 +246,9 @@ export interface CompareResponse {
   listings: CompetitorListing[];
   price_position: PricePosition;
   note: string;
+  /** Listings with a visible price behind the position; under 3 means no verdict. */
+  sample?: number;
+  median?: number | null;
   cached?: boolean;
   cached_at?: string;
   meter?: unknown;
@@ -319,7 +329,7 @@ export type BgRequest =
   | { type: "health" }
   | { type: "check"; id: string; scope?: "due" | "all" | "tariff" | "safety" | "tax" | "policy"; force?: boolean; run_id?: string }
   | { type: "account" }
-  | { type: "alertStatus"; id: string; status: AlertStatus; reason?: string }
+  | { type: "alertStatus"; id: string; status: AlertStatus; reason?: string; also_dismiss?: string[] }
   | { type: "settings" }
   | { type: "open-popup" }
   | { type: "poll" }

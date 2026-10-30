@@ -8,6 +8,8 @@ import { HTS_CATALOG } from "@/lib/hts-catalog";
 import { fieldSource, type ProductOverrides } from "@/lib/product";
 import { DEFAULT_DUTIABLE_SHARE, DEFAULT_UNITS_PER_WEEK, DEFAULT_UNIT_COST_PCT } from "@/lib/pricing";
 import { COUNTRY_NAMES } from "@/lib/rules-catalog";
+import { ORIGIN_SURCHARGE_URL } from "@/lib/duty-exposure";
+import { effectiveProfile } from "@/lib/product";
 import { fmtMoney } from "@/lib/economics";
 import { cx, SrButton, StatusPill } from "@/components/stitch";
 
@@ -41,6 +43,7 @@ export function SellerFields({ product, settings, onSaved }: { product: ProductR
   const [htsDetail, setHtsDetail] = useState(o.hts_detail ?? "");
   const [children, setChildren] = useState(o.for_children == null ? "" : o.for_children ? "yes" : "no");
   const [materials, setMaterials] = useState((o.materials ?? []).join(", "));
+  const [surcharge, setSurcharge] = useState(str(o.duty_surcharge_pct));
   const [open, setOpen] = useState(Boolean(product.overrides && Object.keys(product.overrides).length));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,10 +59,15 @@ export function SellerFields({ product, settings, onSaved }: { product: ProductR
     setHtsDetail(n.hts_detail ?? "");
     setChildren(n.for_children == null ? "" : n.for_children ? "yes" : "no");
     setMaterials((n.materials ?? []).join(", "));
+    setSurcharge(str(n.duty_surcharge_pct));
   }, [product.id, product.overrides]);
 
   const currency = product.currency || settings?.currency || "USD";
   const defaultUnitCost = product.price != null ? product.price * ((settings?.unit_cost_pct ?? DEFAULT_UNIT_COST_PCT) / 100) : null;
+  // The placeholder follows the product's own heading: a toy shows 9503.00.00, not a lamp line.
+  const headingNow = effectiveProfile(product).hts_candidates?.[0]?.code ?? "9405";
+  const detailPlaceholder = `${headingNow}.00.00`;
+  const originNow = effectiveProfile(product).origin_country;
   const setCount = Object.keys(product.overrides ?? {}).length;
 
   const src = (key: keyof ProductOverrides) => (fieldSource(product, key) === "product" ? <StatusPill tone="info" caps={false}>Set for this product</StatusPill> : <StatusPill caps={false}>Workspace default</StatusPill>);
@@ -78,6 +86,7 @@ export function SellerFields({ product, settings, onSaved }: { product: ProductR
       hts_detail: htsDetail.trim() || null,
       for_children: children === "" ? null : children === "yes",
       materials: materials.trim() ? materials : null,
+      duty_surcharge_pct: num(surcharge),
     };
     try {
       const r = await api<{ product: ProductRow; reseed: { added: number; removed: number; kept: number } | null }>(`/api/products/${product.id}`, { method: "PATCH", json: body });
@@ -96,7 +105,7 @@ export function SellerFields({ product, settings, onSaved }: { product: ProductR
     try {
       const r = await api<{ product: ProductRow }>(`/api/products/${product.id}`, {
         method: "PATCH",
-        json: { price_override: null, unit_cost: null, dutiable_share: null, units_per_week: null, origin_country: null, hts_heading: null, hts_detail: null, for_children: null, materials: null },
+        json: { price_override: null, unit_cost: null, dutiable_share: null, units_per_week: null, origin_country: null, hts_heading: null, hts_detail: null, for_children: null, materials: null, duty_surcharge_pct: null },
       });
       onSaved(r.product, "Cleared. This product uses the workspace defaults and the classifier's facts again.");
     } catch (e) {
@@ -130,10 +139,31 @@ export function SellerFields({ product, settings, onSaved }: { product: ProductR
           <div className="sr-grid-2 sr-grid-2--always">
             <Select label="Country of origin" options={ORIGIN_OPTIONS} value={origin} onChange={setOrigin} helpText={<span className="sr-row" style={{ gap: 6 }}>{src("origin_country")} Tariff rules follow this</span>} />
             <Select label="Tariff heading" options={HTS_OPTIONS} value={hts} onChange={setHts} helpText={<span className="sr-row" style={{ gap: 6 }}>{src("hts_heading")} From the catalog</span>} />
-            <TextField label="Heading detail" value={htsDetail} onChange={setHtsDetail} autoComplete="off" placeholder="9405.20.60" helpText={<span className="sr-row" style={{ gap: 6 }}>{src("hts_detail")} Suggested, verify with a broker</span>} />
+            <TextField label="Heading detail" value={htsDetail} onChange={setHtsDetail} autoComplete="off" placeholder={detailPlaceholder} helpText={<span className="sr-row" style={{ gap: 6 }}>{src("hts_detail")} Suggested, verify with a broker</span>} />
             <Select label="Made for children" options={CHILD_OPTIONS} value={children} onChange={setChildren} helpText={<span className="sr-row" style={{ gap: 6 }}>{src("for_children")} Adds or removes CPSC rules</span>} />
           </div>
           <TextField label="Materials" value={materials} onChange={setMaterials} autoComplete="off" placeholder={(product.profile?.materials ?? []).join(", ") || "cotton, brass"} helpText={<span className="sr-row" style={{ gap: 6 }}>{src("materials")} Comma separated; drives Prop 65 and safety rules</span>} />
+          {originNow !== "US" ? (
+            <TextField
+              label="Origin surcharge"
+              type="number"
+              value={surcharge}
+              onChange={setSurcharge}
+              autoComplete="off"
+              suffix="%"
+              min={0}
+              max={200}
+              placeholder="not set"
+              helpText={
+                <span className="sr-row sr-row--wrap" style={{ gap: 6 }}>
+                  {src("duty_surcharge_pct")} Country-based duty you pay on this product beyond the general rate and Section 301 (the 2025 IEEPA actions, then the 2026 Section 122 tariff). It changed several times, so Shop Rules does not guess it.{" "}
+                  <a className="sr-link" href={ORIGIN_SURCHARGE_URL} target="_blank" rel="noopener noreferrer">
+                    cbp.gov
+                  </a>
+                </span>
+              }
+            />
+          ) : null}
           {error ? (
             <p className="sr-xs sr-tone-critical" role="alert">
               {error}
