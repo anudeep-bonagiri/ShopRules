@@ -70,8 +70,11 @@ Checks that do not need keys:
 npm test              # pricing, HTS catalog, guardrails, overrides, nexus, CSV, chart, price parsing
 npm run eval:offline  # golden cases through the verifier and guardrails, writes docs/EVAL.offline.md
 npm run smoke         # Playwright over every page in demo mode, screenshots in docs/design/shots/
+npm run test:ext      # Playwright DOM fixtures for the extension scrapers (Amazon page and search, Etsy page and cards, Shopify)
 npm run eval          # with keys: the same cases against live Nemotron, writes docs/EVAL.md
 ```
+
+`npm run test:ext` and `npm run smoke` look for Playwright in `node_modules/playwright` and then in `PLAYWRIGHT_PATH`. A global or npx install is not found on its own, so point at it: `PLAYWRIGHT_PATH=~/.npm/_npx/<hash>/node_modules/playwright npm run test:ext` (after `npx -y playwright install chromium`).
 
 Open http://localhost:3000. Click "Load demo shop" on the home page to add three sample listings and run the first check, or paste any Etsy, Shopify, or Amazon listing URL.
 

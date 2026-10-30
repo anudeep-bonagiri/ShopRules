@@ -13,3 +13,5 @@ tsconfig.tsbuildinfo
 .vercel
 .sr-data/
 !extension/shop-rules-extension.zip
+logs/
+supabase/.temp/
