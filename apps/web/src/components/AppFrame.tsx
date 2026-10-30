@@ -87,9 +87,9 @@ export function AppFrame({ children }: { children: ReactNode }) {
   );
 
   const logo = {
-    width: 136,
-    topBarSource: "/logo.svg",
-    contextualSaveBarSource: "/logo.svg",
+    width: 150,
+    topBarSource: "/logo-lockup.png",
+    contextualSaveBarSource: "/logo-lockup.png",
     url: "/",
     accessibilityLabel: "Shop Rules",
   };

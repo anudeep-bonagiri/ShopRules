@@ -1,3 +1,5 @@
+<p align="center"><img src="apps/web/public/logo.png" width="560" alt="Shop Rules: tariffs, product safety, sales tax, for Etsy, Shopify and Amazon sellers"></p>
+
 # Shop Rules
 
 **Live demo:** https://shop-rules.vercel.app (click "Load demo shop", open a product, run a check). Chrome extension: `extension/shop-rules-extension.zip`.
