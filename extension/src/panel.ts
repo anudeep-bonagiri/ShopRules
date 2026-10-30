@@ -1,6 +1,7 @@
 // The slide-in overlay: a compact product inspector in the Polaris idiom.
 // Lives in a Shadow DOM host so site CSS cannot touch it, and talks to the
 // API only through the background worker.
+import { canonicalProductUrl } from "./extract";
 import type {
   AccountResponse,
   AccountSettings,
@@ -693,13 +694,17 @@ function renderCompare(s: PanelState): string {
   if (s.compare) {
     const position = POSITION[s.compare.price_position] ?? POSITION.unknown;
     parts.push(`<div class="sr-compare__head">${pill(position.tone, position.label)}<span class="sr-muted sr-small">${esc(s.compare.note)}</span></div>`);
-    const rows = s.compare.listings.slice(0, MAX_COMPETITORS).map((l) => {
+    // The search sometimes returns this very listing; that is not a competitor.
+    const listings = s.compare.listings.filter((l) => canonicalProductUrl(l.url, s.marketplace) !== s.page.url);
+    const hidden = s.compare.listings.length - listings.length;
+    const rows = listings.slice(0, MAX_COMPETITORS).map((l) => {
       const href = safeHref(l.url);
       const link = href ? `<a class="sr-link sr-small" href="${esc(href)}" target="_blank" rel="noopener">Open</a>` : "";
       const market = MARKET_LABEL[l.marketplace.toLowerCase()] ?? capitalize(l.marketplace);
       return `<div class="sr-compare__row">${pill("neutral", market)}<span class="sr-compare__title" title="${esc(l.title)}">${esc(l.title)}</span><span class="sr-compare__price sr-num">${esc(money(l.price, l.currency))}</span>${link}</div>`;
     });
-    parts.push(rows.join("") || '<p class="sr-muted" style="margin-top:8px">No comparable listings found.</p>');
+    const empty = `No comparable listings found.${hidden ? ` ${hidden} result${hidden === 1 ? "" : "s"} matched this listing itself and ${hidden === 1 ? "was" : "were"} hidden.` : ""}`;
+    parts.push(rows.join("") || `<p class="sr-muted" style="margin-top:8px">${empty}</p>`);
   }
   return card(title, parts.join(""));
 }

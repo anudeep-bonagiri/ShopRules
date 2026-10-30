@@ -26,7 +26,7 @@ While developing, `npm run watch -w extension` rebuilds on save. Reload the exte
 ## Configure
 
 1. Pin the Shop Rules icon from the puzzle-piece menu in the Chrome toolbar.
-2. Click it. Enter the Shop Rules URL (defaults to `http://localhost:3000`; use your deployed URL in production).
+2. Click it. Enter the Shop Rules URL (defaults to `https://shop-rules.vercel.app`; use `http://localhost:3000` when running the app locally).
 3. Paste the account token from the web app's Settings page (it starts with `sr_live_`), then click Save.
 4. Click "Test connection". The popup reports the app version, the Tavily mode (keyed or keyless), and whether Nemotron is configured.
 
@@ -67,7 +67,7 @@ The extension sends only the listing URL and the fields it scraped from the page
 2. Run `npm run zip -w extension` from the repo root. This rebuilds `dist/` and writes `extension/shop-rules-extension.zip`.
 3. In the Chrome Web Store developer dashboard, create or open the item and upload the zip.
 4. Fill in the listing: the store needs a 128 px icon (already in the zip), at least one screenshot, and a privacy disclosure. Declare that the extension sends listing URLs and scraped page fields to the user's own Shop Rules server and nowhere else.
-5. For production, change the default URL users see in the popup to your deployed app, or keep `http://localhost:3000` for local use and let users paste their own.
+5. For production, the default URL in the popup is the production app; change `DEFAULT_BASE_URL` in `src/popup.ts` and `src/background.ts` for your own deployment.
 
 Note that the `https://*/*` entry is under `optional_host_permissions`, so the store review sees only the three marketplace hosts plus the API hosts as required permissions.
 

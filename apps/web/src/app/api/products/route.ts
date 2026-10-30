@@ -37,5 +37,6 @@ function sanitizePage(p: PageFields): PageFields {
     description: typeof p.description === "string" ? p.description.slice(0, 6000) : undefined,
     materials: Array.isArray(p.materials) ? p.materials.filter((m) => typeof m === "string").slice(0, 10) : undefined,
     image: typeof p.image === "string" && /^https?:\/\//.test(p.image) ? p.image.slice(0, 500) : null,
+    marketplace: typeof p.marketplace === "string" ? p.marketplace.slice(0, 20).toLowerCase() : null,
   };
 }

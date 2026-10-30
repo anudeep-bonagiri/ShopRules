@@ -146,12 +146,31 @@ export async function chatJSON<S extends ZodTypeAny>(tier: Tier, opts: ChatJsonO
     });
   }
 
-  const raw = extractJson(content);
+  let raw = extractJson(content);
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    throw new Error(`Nemotron ${tier} returned non-JSON for ${opts.name}: ${raw.slice(0, 200)}`);
+    // A truncated or malformed body is rare but not free to surface: one more try with a bigger budget.
+    const retry = await openai.chat.completions.create({
+      ...base,
+      max_tokens: Math.max(Number(base.max_tokens) * 2, 2400),
+      messages: [
+        { role: "system", content: `${opts.system}\n\nReturn only a compact JSON object, no prose.` },
+        { role: "user", content: opts.user },
+      ],
+      response_format: { type: "json_object" },
+    } as unknown as ChatCompletionCreateParamsNonStreaming);
+    const retryContent = retry.choices[0]?.message?.content ?? "";
+    const rp = retry.usage?.prompt_tokens ?? 0;
+    const rc = retry.usage?.completion_tokens ?? 0;
+    if (meter) meter.llm.push({ tier, model, prompt_tokens: rp, completion_tokens: rc, ms: Date.now() - started - ms, cost_usd: costUsd(tier, rp, rc), purpose: `${opts.purpose} (retry)` });
+    raw = extractJson(retryContent);
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new Error(`Nemotron ${tier} returned non-JSON for ${opts.name}: ${raw.slice(0, 200)}`);
+    }
   }
   const result = opts.schema.safeParse(parsed);
   if (!result.success) {

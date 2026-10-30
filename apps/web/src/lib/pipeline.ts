@@ -38,6 +38,7 @@ export interface PageFields {
   description?: string;
   materials?: string[];
   image?: string | null;
+  marketplace?: string | null;
 }
 
 export function normalizeListingUrl(raw: string): string {
@@ -57,6 +58,14 @@ export function normalizeListingUrl(raw: string): string {
   for (const [k, v] of u.searchParams) if (k === "variant" || k === "listing_id") keep.set(k, v);
   u.search = keep.toString() ? `?${keep.toString()}` : "";
   return u.toString();
+}
+
+function safeNormalize(url: string): string | null {
+  try {
+    return normalizeListingUrl(url);
+  } catch {
+    return null;
+  }
 }
 
 function allUltraCost(meter: Meter): number {
@@ -107,7 +116,9 @@ export async function ingestProduct(account: AccountRow, rawUrl: string, page?: 
   if (existing) return { product: existing, rules: await listRules(existing.id, account.id), meter: newMeter(), existing: true };
 
   const meter = newMeter();
-  const marketplace = marketplaceFromUrl(url);
+  // The extension can see Shopify stores on custom domains that the URL alone does not reveal.
+  const hinted = page?.marketplace && ["etsy", "shopify", "amazon"].includes(page.marketplace) ? (page.marketplace as "etsy" | "shopify" | "amazon") : null;
+  const marketplace = hinted ?? marketplaceFromUrl(url);
 
   let extracted = "";
   let extractError: string | null = null;
@@ -419,6 +430,15 @@ export async function compareListings(account: AccountRow, input: { title: strin
     },
     meter,
   );
+  // Drop the seller's own listing when the search returns it.
+  const own = input.url ? safeNormalize(input.url) : null;
+  const ownAsin = own?.match(/\/dp\/([A-Z0-9]{10})/)?.[1] ?? null;
+  parsed.listings = parsed.listings.filter((l) => {
+    const n = safeNormalize(l.url);
+    if (own && n && n === own) return false;
+    if (ownAsin && l.url.toUpperCase().includes(ownAsin)) return false;
+    return true;
+  });
   // The position is arithmetic, not a judgement: median competitor price against the seller's.
   const prices = parsed.listings.map((l) => l.price).filter((p): p is number => typeof p === "number" && Number.isFinite(p) && p > 0).sort((a, b) => a - b);
   let position: CompetitorListings["price_position"] = "unknown";

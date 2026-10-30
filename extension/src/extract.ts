@@ -97,13 +97,23 @@ export function extractPageProduct(market: Marketplace, doc: Document = document
   const description = firstValue(layers, "description");
   return {
     url: pageUrl(market, doc),
-    title: firstValue(layers, "title") ?? clean(doc.title) ?? null,
+    title: firstValue(layers, "title") ?? pageTitle(doc),
     price: firstValue(layers, "price"),
     currency: firstValue(layers, "currency"),
     description,
     materials: firstValue(layers, "materials") ?? materialsFromText(description),
     image: firstValue(layers, "image"),
   };
+}
+
+// The document title is the last resort. A bare hostname (bot walls, error
+// pages) or a one-word title is not a product name.
+function pageTitle(doc: Document): string | null {
+  const title = clean(doc.title);
+  if (!title || title.length < 3) return null;
+  const host = location.hostname.toLowerCase().replace(/^www\./, "");
+  const lowered = title.toLowerCase();
+  return lowered === host || lowered === `www.${host}` ? null : title;
 }
 
 type Field = Exclude<keyof PageProduct, "url">;
