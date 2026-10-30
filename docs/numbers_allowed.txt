@@ -1,0 +1,9 @@
+# number | reason (numbers on the Devpost page that are legitimately not in FACTS)
+3 | track rule: demo video under three minutes
+800 | the US de minimis value threshold in dollars, cited from cbp.gov in the alert sources
+15 | the extension polls for alerts every 15 minutes (extension/src/background.ts)
+25 | products per workspace on the public demo (apps/web/src/app/api/products/route.ts)
+20 | states in the nexus seed table (apps/web/src/lib/rules-catalog.ts)
+6 | competitor extensions torn down (docs/competitors.md)
+14 | Next.js major version in package.json
+13 | Polaris major version in package.json
