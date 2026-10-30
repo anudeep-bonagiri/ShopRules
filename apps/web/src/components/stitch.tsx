@@ -11,6 +11,7 @@ import { timeAgo } from "@/lib/client";
 import type { AccountRow, AlertRow, ProductRow } from "@/lib/db";
 import { economicsFromPricing, fmtCompact, fmtMoney, fmtPct, type Economics } from "@/lib/economics";
 import { pricingForAlert } from "@/lib/pricing";
+import { effectivePrice, pricingProduct } from "@/lib/product";
 import { FAMILY_LABEL } from "@/lib/rules-catalog";
 
 export type Tone = "critical" | "warning" | "success" | "info" | "neutral";
@@ -125,8 +126,9 @@ export function trimNumber(v: number, digits = 1): string {
 // Alerts carry the PricingResult the server computed when they were raised; older
 // alerts without one are recomputed from the same facts with the same function.
 export function alertEconomics(alert: AlertRow, product: ProductRow | null | undefined, settings: Settings): Economics | null {
-  if (!product || product.price == null) return null;
-  const econ = economicsFromPricing(product.price, pricingForAlert(alert, product, settings));
+  const price = product ? effectivePrice(product) : null;
+  if (!product || price == null) return null;
+  const econ = economicsFromPricing(price, pricingForAlert(alert, pricingProduct(product), settings));
   if (!econ) return null;
   econ.duty_delta_pct = alert.impact?.tariff_rate_change_pct ?? null;
   return econ;

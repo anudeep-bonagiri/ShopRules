@@ -26,6 +26,7 @@ import { chatJSON, costUsd, PRICES_PER_M } from "./nemotron";
 import { buildRules, countryName, marketplaceFromUrl, type RuleSpec } from "./rules-catalog";
 import { pricingInputs, reprice } from "./pricing";
 import { auditRuleCheck, historyContext } from "./sanity";
+import { effectiveProfile, effectivePrice, pricingProduct } from "./product";
 import { catalogMenu, finalizeHts } from "./hts-catalog";
 import {
   ClassifierOutputSchema,
@@ -547,8 +548,9 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
   ]);
   const history = historyContext(previousAlerts, priceRows.map((p) => ({ at: p.at, price: Number(p.price) })), today);
 
+  const view = { ...product, profile: effectiveProfile(product), price: effectivePrice(product) };
   const prompt = buildRuleCheckPrompt({
-    product,
+    product: view,
     rule,
     skills: skills.map((s) => s.text),
     history,
@@ -567,7 +569,7 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
 
   // Deterministic guardrails: numbers must be in the quotes, actions must fit the
   // rule, the quotes must be about this product, and repeats are dropped.
-  const audit = auditRuleCheck({ check: raw, verified: verifiedRaw.claims, rule, product, previous: previousAlerts, sources, today });
+  const audit = auditRuleCheck({ check: raw, verified: verifiedRaw.claims, rule, product: view, previous: previousAlerts, sources, today });
   const check = audit.check;
   const backedCount = audit.verified.filter((c) => c.backed).length;
   const verified = { claims: audit.verified, proposed: audit.verified.length, backed: backedCount, rejected: audit.verified.length - backedCount };
@@ -591,7 +593,7 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
   }
 
   // The model reports facts; the price comes from pricing.ts, never from the prompt.
-  const pricingIn = pricingInputs(product, check.impact, settings);
+  const pricingIn = pricingInputs(pricingProduct(product), check.impact, settings);
   const pricing = pricingIn ? reprice(pricingIn) : null;
 
   const alert: AlertRow = {

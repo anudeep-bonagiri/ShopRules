@@ -3,6 +3,7 @@ import type { Marketplace, ProductProfile, RuleFamily, VerifiedClaim } from "./s
 import type { RuleSpec } from "./rules-catalog";
 import type { PricingResult } from "./pricing";
 import type { GuardrailIssue } from "./sanity";
+import type { ProductOverrides } from "./product";
 
 // Server-only data layer. Each workspace (account) is one private JSON document
 // in Vercel Blob. Every write creates a new immutable version file under
@@ -30,6 +31,8 @@ export interface ProductRow {
   currency: string | null;
   image_url: string | null;
   profile: ProductProfile;
+  /** Seller-set fields; see product.ts. The classifier never writes here. */
+  overrides?: ProductOverrides | null;
   extracted_text: string | null;
   created_at: string;
   last_checked_at: string | null;
@@ -417,6 +420,22 @@ export async function insertProductBundle(
     ws.rules.push(...rules);
     if (price) ws.prices.push({ id: uid(), product_id: product.id, price: price.price, currency: price.currency, source: price.source, at: now() });
     return { product, rules, existing: false };
+  });
+}
+
+// Merges seller overrides; null clears a field. Returns the updated product.
+export async function updateProductOverrides(accountId: string, id: string, patch: Partial<ProductOverrides>): Promise<ProductRow> {
+  return mutate(accountId, (ws) => {
+    const p = ws.products.find((x) => x.id === id);
+    if (!p) throw new Error(`Product ${id} not found`);
+    const next: ProductOverrides = { ...(p.overrides ?? {}) };
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined) continue;
+      if (v === null) delete (next as Record<string, unknown>)[k];
+      else (next as Record<string, unknown>)[k] = v;
+    }
+    p.overrides = Object.keys(next).length ? next : null;
+    return { ...p, open_alerts: ws.alerts.filter((a) => a.product_id === p.id && a.status === "new").length };
   });
 }
 

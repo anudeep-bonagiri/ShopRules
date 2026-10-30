@@ -43,6 +43,7 @@ export interface Product {
   currency: string | null;
   image_url: string | null;
   profile: ProductProfile;
+  overrides?: { price_override?: number | null; unit_cost?: number | null; dutiable_share?: number | null; units_per_week?: number | null; origin_country?: string | null; hts_heading?: string | null; hts_detail?: string | null; for_children?: boolean | null; materials?: string[] | null } | null;
   created_at: string;
   last_checked_at: string | null;
   open_alerts?: number;
