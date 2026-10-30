@@ -1,0 +1,7 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Rule catalog keys are slugs like safety-fda-food, not credentials"
+paths = ['''apps/web/src/lib/rules-catalog\.ts''']
+regexes = ['''key: "[a-z0-9-]+"''']
