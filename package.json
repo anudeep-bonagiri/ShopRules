@@ -1,0 +1,13 @@
+{
+  "name": "shop-rules",
+  "private": true,
+  "workspaces": ["apps/web", "extension"],
+  "scripts": {
+    "dev": "npm run dev -w apps/web",
+    "build": "npm run build -w apps/web && npm run build -w extension",
+    "build:web": "npm run build -w apps/web",
+    "build:ext": "npm run build -w extension",
+    "lint": "npm run lint -w apps/web",
+    "typecheck": "npm run typecheck -w apps/web && npm run typecheck -w extension"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "@shop-rules/extension",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "zip": "node build.mjs && cd dist && zip -qr ../shop-rules-extension.zip . && cd .. && echo built shop-rules-extension.zip"
+  },
+  "devDependencies": {
+    "@types/chrome": "0.0.313",
+    "esbuild": "0.25.4",
+    "typescript": "5.8.3"
+  }
+}

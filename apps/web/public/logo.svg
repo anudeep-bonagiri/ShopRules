@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="124" height="28" viewBox="0 0 124 28" fill="none">
+  <rect x="0" y="0" width="28" height="28" rx="7" fill="#008060"/>
+  <path d="M14 5.5l7 2.7v5.3c0 4.4-3 8.4-7 9.5-4-1.1-7-5.1-7-9.5V8.2l7-2.7z" fill="#ffffff" opacity="0.95"/>
+  <path d="M10.6 14.2l2.3 2.3 4.6-4.8" stroke="#008060" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <text x="36" y="19" font-family="Inter, -apple-system, Segoe UI, sans-serif" font-size="15" font-weight="700" fill="#1a1a1a">Shop Rules</text>
+</svg>
