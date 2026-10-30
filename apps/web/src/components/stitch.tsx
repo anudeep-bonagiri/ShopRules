@@ -89,6 +89,25 @@ export function fmtDate(s: string | null | undefined): string | null {
   return s.length > 28 ? `${s.slice(0, 28)}...` : s;
 }
 
+function parseDay(s: string | null | undefined): Date | null {
+  if (!s) return null;
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const d = iso ? new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])) : new Date(s);
+  return Number.isNaN(d.getTime()) || !/\d{4}/.test(s) ? null : d;
+}
+
+// "since May 2, 2025" for past dates, "from Nov 18" for future ones, nothing for today.
+export function effectiveLabel(s: string | null | undefined): string | null {
+  const d = parseDay(s);
+  if (!d) return null;
+  const today = new Date();
+  const sameDay = d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate();
+  if (sameDay) return null;
+  const text = fmtDate(s);
+  if (!text) return null;
+  return d.getTime() < today.getTime() ? `since ${text}` : `from ${text}`;
+}
+
 export function signedMoney(v: number, currency = "USD"): string {
   return `${v >= 0 ? "+" : "-"}${fmtMoney(Math.abs(v), currency)}`;
 }
@@ -257,11 +276,11 @@ export function AuditRow({ title, state, sub, children }: { title: string; state
           <Icon />
         </span>
         <span className="sr-grow">
-          <span className="sr-body sr-clamp2" style={{ fontWeight: 600 }}>
+          <span className="sr-body" style={{ fontWeight: 600, display: "block" }}>
             {title}
           </span>
           {sub ? (
-            <span className={cx("sr-xs sr-clamp2", state === "action" && "sr-tone-critical")} style={{ marginTop: 2 }}>
+            <span className={cx("sr-xs", state === "action" && "sr-tone-critical")} style={{ marginTop: 2, display: "block" }}>
               {sub}
             </span>
           ) : null}
@@ -476,20 +495,35 @@ export function Skeleton({ lines = 3, card = true }: { lines?: number; card?: bo
   return card ? <div className="sr-card">{body}</div> : body;
 }
 
-// Composite: one open alert in the feed
+// Composite: the feed groups open alerts by product, one card per product,
+// each alert as a stacked row that reads: what changed, does it touch me, what to do.
 
-export function PriorityCard({ alert, product, settings }: { alert: AlertRow; product?: ProductRow | null; settings?: Settings }) {
+export function groupAlertsByProduct(sorted: AlertRow[]): Array<{ productId: string; alerts: AlertRow[] }> {
+  const groups: Array<{ productId: string; alerts: AlertRow[] }> = [];
+  const index = new Map<string, number>();
+  for (const a of sorted) {
+    const i = index.get(a.product_id);
+    if (i == null) {
+      index.set(a.product_id, groups.length);
+      groups.push({ productId: a.product_id, alerts: [a] });
+    } else {
+      groups[i].alerts.push(a);
+    }
+  }
+  return groups;
+}
+
+export function AlertRowItem({ alert, product, settings, showProduct }: { alert: AlertRow; product?: ProductRow | null; settings?: Settings; showProduct?: boolean }) {
   const econ = alertEconomics(alert, product, settings);
   const tone = alertTone(alert);
   const color = toneColor(tone);
   const currency = product?.currency || settings?.currency || "USD";
-  const hts = product?.profile?.hts_candidates?.[0];
   const domain = sourceDomain(alert);
   const drag = weeklyDrag(econ);
   const delta = alert.impact?.tariff_rate_change_pct ?? null;
-  const date = fmtDate(alert.impact?.effective_date);
+  const when = effectiveLabel(alert.impact?.effective_date);
   const isOpen = alert.status === "new";
-  const isReprice = alert.action?.type === "reprice" && alert.action.suggested_price != null && product?.price != null && Math.abs(alert.action.suggested_price - product.price) >= 0.005;
+  const washTone = tone === "neutral" ? "info" : tone;
 
   const pill = !isOpen ? (
     <StatusPill tone={tone}>{alert.status === "actioned" ? "Done" : "Dismissed"}</StatusPill>
@@ -504,88 +538,89 @@ export function PriorityCard({ alert, product, settings }: { alert: AlertRow; pr
     </StatusPill>
   );
 
-  const leftText = isReprice && product?.price != null ? `Reprice suggested (${signedMoney((alert.action.suggested_price as number) - product.price, currency)})` : alert.action?.title || "Review";
-
   return (
-    <article className="sr-card sr-stack" aria-label={alert.headline}>
-      <div className="sr-row sr-row--top" style={{ gap: 10 }}>
-        <ProductThumb product={product} />
-        <div className="sr-grow sr-stack" style={{ gap: 2 }}>
-          <div className="sr-row sr-row--between" style={{ gap: 8 }}>
-            <div className="sr-row sr-grow" style={{ gap: 6 }}>
-              <StatusPill caps={false}>{marketplaceLabel(product?.marketplace)}</StatusPill>
-              <span className="sr-xs sr-truncate">{product?.profile?.product_type || FAMILY_LABEL[alert.family] || alert.family}</span>
-            </div>
-            {pill}
-          </div>
-          <h3 className="sr-h3 sr-truncate" style={{ fontSize: 14 }}>
-            {product?.title ?? alert.product_title ?? "Product"}
-          </h3>
-          <p className="sr-body sr-clamp2">{alert.headline}</p>
-          <p className="sr-xs sr-truncate sr-num">
-            {hts?.code ? `HS ${hts.code}` : FAMILY_LABEL[alert.family] ?? alert.family}
-            {domain ? `, ${domain}` : ""}
-          </p>
-        </div>
-      </div>
-
-      {econ && econ.new_margin_pct != null ? (
-        <div className={cx("sr-wash", `sr-wash--${tone === "neutral" ? "info" : tone}`, "sr-row sr-row--between")}>
-          <div>
-            <p className="sr-xs" style={{ fontWeight: 500 }}>
-              Net margin
-            </p>
-            <div className="sr-row" style={{ gap: 6, alignItems: "baseline" }}>
-              <span className="sr-num" style={{ fontSize: 16, fontWeight: 700, color }}>
-                {fmtPct(econ.new_margin_pct)}
-              </span>
-              <span className="sr-xs sr-strike sr-num">{fmtPct(econ.margin_pct)}</span>
-              <span className="sr-xs sr-num" style={{ fontWeight: 600, color }}>
-                ({fmtPct(econ.margin_shift_pct, 1, true)})
-              </span>
-            </div>
-          </div>
-          <div className="sr-right">
-            <p className="sr-xs" style={{ fontWeight: 500 }}>
-              Weekly loss
-            </p>
-            <p className="sr-num" style={{ fontSize: 15, fontWeight: 700, color }}>
-              -{fmtMoney(drag, currency, 0)}{" "}
-              <span className="sr-xs" style={{ fontWeight: 400 }}>
-                /wk
-              </span>
-            </p>
-          </div>
-        </div>
-      ) : (
-        <div className={cx("sr-wash", `sr-wash--${tone === "neutral" ? "info" : tone}`, "sr-row sr-row--between")}>
-          <span className="sr-body sr-truncate" style={{ fontWeight: 500 }}>
-            {alert.action?.title || "Review the change"}
-          </span>
-          {date ? (
-            <span className="sr-xs sr-right" style={{ fontWeight: 600, color }}>
-              Effective {date}
-            </span>
-          ) : (
-            <span className="sr-xs sr-right">{alert.relevance === "affects" ? "Applies to this product" : "Might apply"}</span>
-          )}
-        </div>
-      )}
-
-      <p className="sr-xs sr-num">
-        {alert.proposed > 0 ? `${alert.backed} of ${alert.proposed} claims backed by ${domain ?? "the official source"}` : `Read from ${domain ?? "the official source"}`}
-      </p>
-
+    <div className="sr-alertrow">
       <div className="sr-row sr-row--between" style={{ gap: 8 }}>
-        <span className={cx("sr-xs sr-truncate sr-grow", isReprice && isOpen && "sr-tone-success")} style={{ fontWeight: 500 }}>
-          {isOpen ? leftText : alert.status === "actioned" ? "Marked done" : "Dismissed"}
+        <div className="sr-row sr-row--wrap" style={{ gap: 6 }}>
+          {pill}
+          <span className="sr-xs">{FAMILY_SHORT[alert.family] ?? alert.family}</span>
+          {showProduct && product ? <span className="sr-xs sr-truncate">{product.title}</span> : null}
+        </div>
+        <span className="sr-xs sr-num sr-right">{timeAgo(alert.created_at)}</span>
+      </div>
+      <p className="sr-body" style={{ fontWeight: 600, lineHeight: "18px" }}>
+        {alert.headline}
+      </p>
+      <div className={cx("sr-wash", `sr-wash--${washTone}`, "sr-stack sr-stack--tight")}>
+        {econ && econ.new_margin_pct != null ? (
+          <p className="sr-xs sr-num">
+            Margin {fmtPct(econ.margin_pct)} to{" "}
+            <span style={{ fontWeight: 700, color }}>{fmtPct(econ.new_margin_pct)}</span> ({fmtPct(econ.margin_shift_pct, 1, true)}),{" "}
+            <span style={{ fontWeight: 700, color }}>-{fmtMoney(drag, currency, 0)}</span> a week at {settings?.units_per_week ?? 20} units
+            {when ? `, ${when}` : ""}
+          </p>
+        ) : (
+          <p className="sr-xs">
+            {alert.relevance === "affects" ? "Applies to this product" : "Might apply to this product"}
+            {when ? `, ${when}` : ""}
+          </p>
+        )}
+        <p className="sr-body" style={{ fontWeight: 500 }}>
+          {alert.action?.title || "Review the change"}
+        </p>
+      </div>
+      <div className="sr-actions">
+        <span className="sr-xs sr-num sr-grow">
+          {alert.proposed > 0 ? `${alert.backed} of ${alert.proposed} claims backed by ${domain ?? "the official source"}` : `Read from ${domain ?? "the official source"}`}
         </span>
-        <div className="sr-row" style={{ gap: 8 }}>
-          {product ? <SrButton href={`/products/${product.id}`}>Inspect</SrButton> : null}
-          <SrButton variant="primary" href={`/alerts/${alert.id}`}>
+        <div className="sr-actions__buttons">
+          {product && showProduct ? <SrButton href={`/products/${product.id}`}>Inspect</SrButton> : null}
+          <SrButton variant={isOpen ? "primary" : "secondary"} href={`/alerts/${alert.id}`}>
             {isOpen ? actionLabel(alert.action?.type) : "Open"}
           </SrButton>
         </div>
+      </div>
+    </div>
+  );
+}
+
+export function PriorityGroup({ product, alerts, settings, fallbackTitle }: { product?: ProductRow | null; alerts: AlertRow[]; settings?: Settings; fallbackTitle?: string }) {
+  const currency = product?.currency || settings?.currency || "USD";
+  const openCount = alerts.filter((a) => a.status === "new").length;
+  const title = product?.title ?? fallbackTitle ?? "Product";
+  return (
+    <article className="sr-card sr-card--flush" aria-label={title}>
+      <div className="sr-group-head">
+        <ProductThumb product={product} size="sm" />
+        <div className="sr-grow" style={{ minWidth: 0 }}>
+          {product ? (
+            <NextLink href={`/products/${product.id}`} className="sr-group-title sr-truncate">
+              {title}
+            </NextLink>
+          ) : (
+            <span className="sr-group-title sr-truncate">{title}</span>
+          )}
+          <div className="sr-row" style={{ gap: 6, marginTop: 2 }}>
+            <StatusPill caps={false}>{marketplaceLabel(product?.marketplace)}</StatusPill>
+            <span className="sr-xs sr-num">{fmtMoney(product?.price ?? null, currency)}</span>
+            {product?.profile?.hts_candidates?.[0]?.code ? <span className="sr-xs sr-num sr-truncate">HS {product.profile.hts_candidates[0].code}</span> : null}
+          </div>
+        </div>
+        <div className="sr-row" style={{ gap: 8 }}>
+          <StatusPill tone={openCount > 0 ? "critical" : "neutral"} caps={false}>
+            {alerts.length} alert{alerts.length === 1 ? "" : "s"}
+          </StatusPill>
+          {product ? (
+            <SrButton href={`/products/${product.id}`} ariaLabel={`Inspect ${title}`} className="sr-desktop-only">
+              Inspect
+            </SrButton>
+          ) : null}
+        </div>
+      </div>
+      <div className="sr-rows">
+        {alerts.map((a) => (
+          <AlertRowItem key={a.id} alert={a} product={product} settings={settings} />
+        ))}
       </div>
     </article>
   );
@@ -658,7 +693,7 @@ export function DutyImpact({ econ, tone, currency, units }: { econ: Economics; t
           <p className="sr-xs" style={{ fontWeight: 600, color: "var(--sr-text)" }}>
             Projected weekly profit drag
           </p>
-          <p className="sr-xs">Based on {units} units/week. Edit in Settings.</p>
+          <p className="sr-xs">Based on {units} units a week</p>
         </div>
         <p className="sr-num sr-right" style={{ fontSize: 15, fontWeight: 700, color }}>
           {drag > 0 ? "-" : "+"}

@@ -57,8 +57,8 @@ body {
 
 /* Page shell */
 .sr-page {
-  max-width: 1040px;
-  margin: 0 auto;
+  max-width: 1120px;
+  margin: 0;
   padding: 16px 16px calc(var(--sr-tabs-h) + 32px);
   display: flex;
   flex-direction: column;
@@ -69,6 +69,8 @@ body {
 }
 @media (min-width: 768px) {
   .sr-page {
+    margin: 0;
+    max-width: 1120px;
     padding: 24px 32px 56px;
   }
 }
@@ -1409,4 +1411,94 @@ body {
   width: 16px;
   height: 16px;
   fill: var(--sr-primary);
+}
+
+/* Alert rows inside a product group */
+.sr-group-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--sr-border);
+  background: var(--sr-canvas);
+  min-width: 0;
+}
+.sr-group-title {
+  display: block;
+  font-size: 14px;
+  line-height: 18px;
+  font-weight: 600;
+  color: var(--sr-text);
+  text-decoration: none;
+}
+.sr-group-title:hover {
+  color: var(--sr-primary);
+}
+.sr-alertrow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+}
+.sr-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.sr-actions__buttons {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.sr-priority {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Hover and focus */
+.sr-btn:focus-visible,
+.sr-chip:focus-visible,
+.sr-prow:focus-visible,
+.sr-tab:focus-visible,
+.sr-audit__head:focus-visible,
+.sr-link:focus-visible,
+.sr-select:focus-visible,
+.sr-code__copy:focus-visible,
+.sr-group-title:focus-visible,
+.sr-back:focus-visible,
+.sr-disclosure > summary:focus-visible {
+  outline: 2px solid var(--sr-primary);
+  outline-offset: 2px;
+  border-radius: var(--sr-radius-sm);
+}
+.sr-tab:hover {
+  color: var(--sr-text);
+}
+.sr-audit__head:hover .sr-body {
+  color: var(--sr-primary);
+}
+.sr-disclosure > summary:hover {
+  color: var(--sr-primary);
+}
+.sr-card--flush .sr-prow:first-child {
+  border-top-left-radius: var(--sr-radius);
+  border-top-right-radius: var(--sr-radius);
+}
+
+/* Accent card header: pill beside the title on wide screens, above it on phones */
+.sr-accent-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+@media (max-width: 639px) {
+  .sr-accent-head {
+    flex-direction: column-reverse;
+    align-items: flex-start;
+  }
 }

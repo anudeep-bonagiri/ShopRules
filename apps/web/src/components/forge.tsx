@@ -168,14 +168,14 @@ export function ForgeListRow({ forge }: { forge: ForgeRow }) {
   return (
     <NextLink href={`/forge/${forge.id}`} className="sr-prow" style={{ padding: "10px 0" }}>
       <div className="sr-grow sr-stack" style={{ gap: 3 }}>
-        <div className="sr-row" style={{ gap: 8 }}>
+        <div className="sr-row sr-row--top" style={{ gap: 8 }}>
           <ForgeStatusPill status={forge.status} />
-          <span className="sr-body sr-truncate" style={{ fontWeight: 600 }}>
+          <span className="sr-body" style={{ fontWeight: 600 }}>
             {prettyFact(forge.fact_name)}
           </span>
         </div>
-        <span className="sr-xs sr-truncate">{forge.rule_title}</span>
-        <span className="sr-xs sr-num sr-truncate">
+        <span className="sr-xs">{forge.rule_title}</span>
+        <span className="sr-xs sr-num">
           {forge.iterations} iteration{forge.iterations === 1 ? "" : "s"}, {shortImage(forge.sandbox_image)}, {fmtCost(forge.llm_cost_usd)}, {fmtDuration(forge.duration_ms)}, {timeAgo(forge.created_at)}
         </span>
       </div>
@@ -235,7 +235,7 @@ function stepTone(s: ForgeStep): Tone {
   return "neutral";
 }
 
-export function ForgeTimeline({ steps }: { steps: ForgeStep[] }) {
+export function ForgeTimeline({ steps, sandboxNote }: { steps: ForgeStep[]; sandboxNote?: string | null }) {
   if (steps.length === 0) return <p className="sr-sm">No steps were recorded.</p>;
   return (
     <div className="sr-timeline">
@@ -261,7 +261,13 @@ export function ForgeTimeline({ steps }: { steps: ForgeStep[] }) {
               </div>
               {run ? (
                 <>
-                  {run.headline && run.tests.length ? <p className="sr-xs sr-num">{run.headline}</p> : run.headline ? <p className="sr-pre">{s.detail}</p> : null}
+                  {sandboxNote && s.detail === sandboxNote ? (
+                    <p className="sr-xs">Skipped. The code and tests above are kept; configure the sandbox to run them.</p>
+                  ) : run.headline && run.tests.length ? (
+                    <p className="sr-xs sr-num">{run.headline}</p>
+                  ) : run.headline ? (
+                    <p className="sr-pre">{s.detail}</p>
+                  ) : null}
                   {run.tests.length ? (
                     <div className="sr-tests">
                       {run.tests.map((t) => (

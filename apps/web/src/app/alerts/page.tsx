@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useApi } from "@/lib/client";
 import type { AccountRow, AlertRow, ProductRow } from "@/lib/db";
-import { Chip, ChipRow, EmptyCard, PriorityCard, SectionHead, Skeleton, sortAlerts, SrButton, StatusPill } from "@/components/stitch";
+import { Chip, ChipRow, EmptyCard, groupAlertsByProduct, PriorityGroup, SectionHead, Skeleton, sortAlerts, SrButton, StatusPill } from "@/components/stitch";
 
 type Tab = "new" | "actioned" | "dismissed" | "all";
 const TABS: Array<{ id: Tab; label: string }> = [
@@ -65,7 +65,7 @@ export default function AlertsPage() {
       </ChipRow>
 
       <section className="sr-stack">
-        <SectionHead title={TABS.find((t) => t.id === tab)?.label ?? "Alerts"} aside={tab === "new" && list.length > 1 ? "By severity, then weekly margin drag" : undefined} />
+        <SectionHead title={TABS.find((t) => t.id === tab)?.label ?? "Alerts"} aside={tab === "new" && list.length > 1 ? "One card per product, by severity then weekly margin drag" : undefined} />
         {alerts.loading || products.loading ? (
           <Skeleton lines={4} />
         ) : list.length === 0 ? (
@@ -73,9 +73,9 @@ export default function AlertsPage() {
             <SrButton href="/products">Open Inspector</SrButton>
           </EmptyCard>
         ) : (
-          <div className="sr-grid-2">
-            {list.map((a) => (
-              <PriorityCard key={a.id} alert={a} product={productMap.get(a.product_id)} settings={settings} />
+          <div className="sr-priority">
+            {groupAlertsByProduct(list).map((g) => (
+              <PriorityGroup key={g.productId} product={productMap.get(g.productId)} alerts={g.alerts} settings={settings} fallbackTitle={g.alerts[0]?.product_title} />
             ))}
           </div>
         )}

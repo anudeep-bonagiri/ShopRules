@@ -75,9 +75,11 @@ export default function ForgePage() {
               {f.rule_title}
               {f.product_title ? `, ${f.product_title}` : ""}
             </p>
-            <p className="sr-xs sr-mono" style={{ marginTop: 4 }}>
-              check() returns {f.fact_name}
-            </p>
+            {!/\s/.test(f.fact_name) ? (
+              <p className="sr-xs sr-mono" style={{ marginTop: 4 }}>
+                check() returns {f.fact_name}
+              </p>
+            ) : null}
           </div>
         </div>
         <ForgeStepper settled={f} compact />
@@ -91,7 +93,7 @@ export default function ForgePage() {
 
       {f.status === "unrun" ? (
         <AccentCard tone="warning" className="sr-stack">
-          <div className="sr-row sr-row--between sr-row--top">
+          <div className="sr-accent-head">
             <div className="sr-grow">
               <h2 className="sr-h2">Sandbox not configured</h2>
               <p className="sr-sm" style={{ marginTop: 4 }}>
@@ -148,7 +150,7 @@ export default function ForgePage() {
             {f.steps.length} step{f.steps.length === 1 ? "" : "s"}
           </span>
         </div>
-        <ForgeTimeline steps={f.steps} />
+        <ForgeTimeline steps={f.steps} sandboxNote={f.sandbox_note} />
       </SrCard>
 
       <SrCard className="sr-stack">
@@ -178,7 +180,7 @@ export default function ForgePage() {
                 <span className="sr-xs" style={{ fontWeight: 600, color: "var(--sr-text)" }}>
                   {hostOf(s.url) ?? s.url}
                 </span>
-                <a href={s.url} target="_blank" rel="noopener noreferrer" className="sr-link sr-truncate" style={{ fontSize: 12, display: "block" }}>
+                <a href={s.url} target="_blank" rel="noopener noreferrer" className="sr-link" style={{ fontSize: 12, display: "block", wordBreak: "break-word" }}>
                   {s.title || s.url}
                 </a>
               </div>

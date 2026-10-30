@@ -88,6 +88,11 @@ export default function SettingsPage() {
             Pricing assumptions, the states you ship to, and the extension token.
           </p>
         </div>
+        {health.data ? (
+          <StatusPill tone={health.data.nemotron_configured && health.data.storage_configured ? "success" : "warning"} caps={false} live={health.data.nemotron_configured && health.data.storage_configured}>
+            {health.data.nemotron_configured && health.data.storage_configured ? "Workspace ready" : "Setup incomplete"}
+          </StatusPill>
+        ) : null}
       </div>
 
       {notice ? (

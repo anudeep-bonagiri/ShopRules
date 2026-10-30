@@ -9,7 +9,7 @@ import type { AccountRow, AlertRow, ProductRow, RuleRow, SkillRow } from "@/lib/
 import { fmtMoney, fmtPct } from "@/lib/economics";
 import { FAMILY_LABEL } from "@/lib/rules-catalog";
 import { EvidenceBar } from "@/components/ui";
-import { AccentCard, alertEconomics, alertTone, BackLink, DutyImpact, fmtDate, hostOf, KV, marketplaceLabel, ProductThumb, RepriceBlock, Skeleton, sourceDomain, SrButton, SrCard, StatusPill } from "@/components/stitch";
+import { AccentCard, alertEconomics, alertTone, BackLink, DutyImpact, effectiveLabel, fmtDate, hostOf, KV, marketplaceLabel, ProductThumb, RepriceBlock, Skeleton, sourceDomain, SrButton, SrCard, StatusPill } from "@/components/stitch";
 
 type Detail = { alert: AlertRow; product: ProductRow | null; rule: RuleRow | null; sources: AlertRow["sources"] };
 
@@ -101,6 +101,7 @@ export default function AlertPage() {
   // A suggestion equal to the current price is not a reprice; show the steps instead.
   const suggested = suggestedRaw != null && product?.price != null && Math.abs(suggestedRaw - product.price) < 0.005 ? null : suggestedRaw;
   const effective = fmtDate(alert.impact?.effective_date);
+  const when = effectiveLabel(alert.impact?.effective_date);
 
   return (
     <div className="sr-page">
@@ -120,13 +121,13 @@ export default function AlertPage() {
       <div className="sr-hud">
         <div className="sr-hud__main">
           <AccentCard tone={tone} className="sr-stack" style={{ order: 1 }}>
-            <div className="sr-row sr-row--between sr-row--top">
+            <div className="sr-accent-head">
               <div className="sr-grow">
                 <h1 className="sr-h2">{alert.headline}</h1>
                 <p className="sr-sm sr-num" style={{ marginTop: 4 }}>
                   {hts?.code ? `HS ${hts.code}, ` : ""}
                   {domain ?? FAMILY_LABEL[alert.family]}
-                  {effective ? `, effective ${effective}` : ""}
+                  {when ? `, ${when}` : ""}
                 </p>
                 <p className="sr-xs" style={{ marginTop: 4 }}>
                   {product ? (
@@ -257,7 +258,7 @@ export default function AlertPage() {
                     <span className="sr-xs" style={{ fontWeight: 600, color: "var(--sr-text)" }}>
                       {s.domain}
                     </span>
-                    <a href={s.url} target="_blank" rel="noopener noreferrer" className="sr-link sr-truncate" style={{ fontSize: 12, display: "block" }}>
+                    <a href={s.url} target="_blank" rel="noopener noreferrer" className="sr-link" style={{ fontSize: 12, display: "block", wordBreak: "break-word" }}>
                       {s.title || s.url}
                     </a>
                   </div>

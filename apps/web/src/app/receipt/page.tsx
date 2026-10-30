@@ -51,14 +51,14 @@ export default function ReceiptPage() {
           const cost = row?.cost_usd ?? 0;
           return (
             <div key={k} className="sr-stack sr-stack--tight">
-              <div className="sr-row sr-row--between" style={{ gap: 12 }}>
+              <div className="sr-row sr-row--between sr-row--wrap" style={{ gap: 4 }}>
                 <div className="sr-grow">
                   <span className="sr-body" style={{ fontWeight: 600 }}>
                     {TIER_NAME[k]}
                   </span>{" "}
                   <span className="sr-xs sr-mono">{data?.models[k]}</span>
                 </div>
-                <span className="sr-xs sr-num sr-right">{row ? `${row.calls} calls, ${(row.prompt_tokens + row.completion_tokens).toLocaleString()} tokens, $${cost.toFixed(4)}, ${(row.ms / Math.max(row.calls, 1) / 1000).toFixed(1)} s avg` : "no calls"}</span>
+                <span className="sr-xs sr-num">{row ? `${row.calls} calls, ${(row.prompt_tokens + row.completion_tokens).toLocaleString()} tokens, $${cost.toFixed(4)}, ${(row.ms / Math.max(row.calls, 1) / 1000).toFixed(1)} s avg` : "no calls"}</span>
               </div>
               <div className="sr-progress">
                 <span style={{ width: `${(cost / maxCost) * 100}%`, background: k === "ultra" ? "var(--sr-text)" : k === "super" ? "var(--sr-text-2)" : "var(--sr-primary)" }} />

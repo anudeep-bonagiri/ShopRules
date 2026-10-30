@@ -17,9 +17,9 @@ import {
   BackLink,
   Disclosure,
   DutyImpact,
+  effectiveLabel,
   EmptyCard,
   FAMILY_SHORT,
-  fmtDate,
   marketplaceLabel,
   ProductThumb,
   RepriceBlock,
@@ -263,12 +263,12 @@ export default function ProductInspectorPage() {
                   ))}
                 </div>
                 <h1 className="sr-h2 sr-clamp2">{product.title}</h1>
-                <p className="sr-sm sr-truncate">
+                <p className="sr-sm">
                   Category: {profile?.category || "n/a"}
                   {profile?.product_type ? `, ${profile.product_type}` : ""}
                 </p>
                 {hts?.code ? (
-                  <p className="sr-xs sr-truncate sr-num">
+                  <p className="sr-xs sr-num">
                     HS {hts.code}, {hts.description} ({Math.round(hts.confidence * 100)}% confidence)
                   </p>
                 ) : null}
@@ -310,13 +310,13 @@ export default function ProductInspectorPage() {
 
           {top ? (
             <AccentCard tone={topTone} className="sr-stack" style={{ order: 2 }}>
-              <div className="sr-row sr-row--between sr-row--top">
+              <div className="sr-accent-head">
                 <div className="sr-grow">
                   <h2 className="sr-h2">{top.headline}</h2>
                   <p className="sr-sm sr-num" style={{ marginTop: 4 }}>
                     {hts?.code ? `HS ${hts.code}, ` : ""}
                     {topDomain ?? FAMILY_LABEL[top.family]}
-                    {fmtDate(top.impact?.effective_date) ? `, effective ${fmtDate(top.impact?.effective_date)}` : ""}
+                    {effectiveLabel(top.impact?.effective_date) ? `, ${effectiveLabel(top.impact?.effective_date)}` : ""}
                   </p>
                 </div>
                 <StatusPill tone={topTone} dot>
@@ -341,16 +341,18 @@ export default function ProductInspectorPage() {
                       ))}
                     </ol>
                   ) : null}
-                  {top.impact?.estimated_cost_change_pct != null ? <p className="sr-xs sr-num">Estimated cost change {fmtPct(top.impact.estimated_cost_change_pct, 1, true)}</p> : null}
+                  {top.impact?.estimated_cost_change_pct ? <p className="sr-xs sr-num">Estimated cost change {fmtPct(top.impact.estimated_cost_change_pct, 1, true)}</p> : null}
                 </div>
               )}
 
-              <div className="sr-row sr-row--between">
-                <span className="sr-xs sr-num sr-truncate">
+              <div className="sr-actions">
+                <span className="sr-xs sr-num sr-grow">
                   {top.proposed > 0 ? `${top.backed} of ${top.proposed} claims backed by ${topDomain ?? "the official source"}` : `Read from ${topDomain ?? "the official source"}`}
                   {openAlerts.length > 1 ? `, ${openAlerts.length - 1} more open` : ""}
                 </span>
-                <SrButton href={`/alerts/${top.id}`}>See evidence</SrButton>
+                <div className="sr-actions__buttons">
+                  <SrButton href={`/alerts/${top.id}`}>See evidence</SrButton>
+                </div>
               </div>
             </AccentCard>
           ) : (
@@ -391,7 +393,13 @@ export default function ProductInspectorPage() {
                   const a = openByRule.get(r.id);
                   const state = a ? "action" : r.last_run_at ? "clear" : "pending";
                   return (
-                    <AuditRow key={r.id} title={r.title} state={state} sub={a ? a.headline : r.last_run_at ? `Checked ${timeAgo(r.last_run_at)}, ${r.include_domains[0]}` : r.include_domains.join(", ")}>
+                    <AuditRow key={r.id} title={r.title} state={state} sub={a ? `Open alert ${timeAgo(a.created_at)}, ${sourceDomain(a) ?? r.include_domains[0]}` : r.last_run_at ? `Checked ${timeAgo(r.last_run_at)}, ${r.include_domains[0]}` : r.include_domains.join(", ")}>
+                      {a ? (
+                        <p style={{ margin: 0, color: "var(--sr-text)" }}>
+                          {a === top ? "Shown above. " : ""}
+                          {a.action?.title}
+                        </p>
+                      ) : null}
                       {r.seed_note ? <p style={{ margin: 0 }}>{r.seed_note}</p> : null}
                       {r.last_headline ? <p style={{ margin: 0 }}>Last finding: {r.last_headline}</p> : null}
                       <p style={{ margin: 0 }}>
@@ -483,7 +491,7 @@ export default function ProductInspectorPage() {
                           .map((r) => (
                             <div key={r.id} style={{ padding: "8px 0" }}>
                               <div className="sr-row sr-row--between" style={{ gap: 8 }}>
-                                <span className="sr-body sr-truncate" style={{ fontWeight: 600 }}>
+                                <span className="sr-body" style={{ fontWeight: 600 }}>
                                   {r.title}
                                 </span>
                                 {openByRule.has(r.id) ? <StatusPill tone="critical">Open</StatusPill> : r.last_run_at ? <StatusPill tone="success">Clear</StatusPill> : <StatusPill>Queued</StatusPill>}

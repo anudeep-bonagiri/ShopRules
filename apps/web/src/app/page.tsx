@@ -15,8 +15,9 @@ import {
   EmptyCard,
   FAMILY_SHORT,
   fmtShort,
+  groupAlertsByProduct,
   MetricCard,
-  PriorityCard,
+  PriorityGroup,
   ProgressRow,
   PulseRow,
   SectionHead,
@@ -197,35 +198,60 @@ export default function WatchlistPage() {
         )}
       </div>
 
-      <SrCard className="sr-stack">
-        <div>
-          <h2 className="sr-h2">Watch a listing</h2>
-          <p className="sr-sm" style={{ marginTop: 4 }}>
-            Paste an Etsy, Shopify, or Amazon listing URL. Shop Rules reads the page, works out what the product is, and starts watching the duty, safety, tax, and policy rules that touch it.
-          </p>
-        </div>
-        <TextField
-          label="Listing URL"
-          labelHidden
-          value={url}
-          onChange={setUrl}
-          autoComplete="off"
-          placeholder="https://www.etsy.com/listing/..."
-          clearButton
-          onClearButtonClick={() => setUrl("")}
-          connectedRight={
-            <Button variant="primary" onClick={addListing} loading={busy === "add"} disabled={!url.trim() || busy === "demo"}>
-              Watch product
-            </Button>
-          }
-        />
-        <div className="sr-row sr-row--between sr-row--wrap">
-          <span className="sr-xs">Or add the page you are on with the Chrome extension.</span>
+      {productCount > 0 ? (
+        <SrCard className="sr-row sr-row--wrap" style={{ padding: 10, gap: 8 }}>
+          <div className="sr-grow" style={{ minWidth: 240 }}>
+            <TextField
+              label="Listing URL"
+              labelHidden
+              value={url}
+              onChange={setUrl}
+              autoComplete="off"
+              placeholder="Watch another listing: paste an Etsy, Shopify, or Amazon URL"
+              clearButton
+              onClearButtonClick={() => setUrl("")}
+              connectedRight={
+                <Button variant="primary" onClick={addListing} loading={busy === "add"} disabled={!url.trim() || busy === "demo"}>
+                  Watch
+                </Button>
+              }
+            />
+          </div>
           <Button variant="plain" onClick={loadDemo} loading={busy === "demo"} disabled={busy === "add"}>
             Load demo shop
           </Button>
-        </div>
-      </SrCard>
+        </SrCard>
+      ) : (
+        <SrCard className="sr-stack">
+          <div>
+            <h2 className="sr-h2">Watch a listing</h2>
+            <p className="sr-sm" style={{ marginTop: 4 }}>
+              Paste an Etsy, Shopify, or Amazon listing URL. Shop Rules reads the page, works out what the product is, and starts watching the duty, safety, tax, and policy rules that touch it.
+            </p>
+          </div>
+          <TextField
+            label="Listing URL"
+            labelHidden
+            value={url}
+            onChange={setUrl}
+            autoComplete="off"
+            placeholder="https://www.etsy.com/listing/..."
+            clearButton
+            onClearButtonClick={() => setUrl("")}
+            connectedRight={
+              <Button variant="primary" onClick={addListing} loading={busy === "add"} disabled={!url.trim() || busy === "demo"}>
+                Watch product
+              </Button>
+            }
+          />
+          <div className="sr-row sr-row--between sr-row--wrap">
+            <span className="sr-xs">Or add the page you are on with the Chrome extension.</span>
+            <Button variant="plain" onClick={loadDemo} loading={busy === "demo"} disabled={busy === "add"}>
+              Load demo shop
+            </Button>
+          </div>
+        </SrCard>
+      )}
 
       <ChipRow label="Filter alerts">
         {FAMILIES.map((f) => (
@@ -236,7 +262,7 @@ export default function WatchlistPage() {
       </ChipRow>
 
       <section className="sr-stack">
-        <SectionHead title="Priority" aside={visible.length > 1 ? "By severity, then weekly margin drag" : undefined} />
+        <SectionHead title="Priority" aside={visible.length > 1 ? "One card per product, by severity then weekly margin drag" : undefined} />
         {loading ? (
           <Skeleton lines={4} />
         ) : productCount === 0 ? (
@@ -256,9 +282,9 @@ export default function WatchlistPage() {
             </EmptyCard>
           )
         ) : (
-          <div className="sr-grid-2">
-            {visible.map((a) => (
-              <PriorityCard key={a.id} alert={a} product={productMap.get(a.product_id)} settings={settings} />
+          <div className="sr-priority">
+            {groupAlertsByProduct(visible).map((g) => (
+              <PriorityGroup key={g.productId} product={productMap.get(g.productId)} alerts={g.alerts} settings={settings} fallbackTitle={g.alerts[0]?.product_title} />
             ))}
           </div>
         )}

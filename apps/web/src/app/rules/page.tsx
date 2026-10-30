@@ -84,7 +84,7 @@ export default function RulesPage() {
               {visible.map((r) => (
                 <div key={r.id} className="sr-stack" style={{ padding: "12px 14px", gap: 4 }}>
                   <div className="sr-row sr-row--between" style={{ gap: 8 }}>
-                    <span className="sr-body sr-truncate" style={{ fontWeight: 600 }}>
+                    <span className="sr-body" style={{ fontWeight: 600 }}>
                       {r.title}
                     </span>
                     <div className="sr-row" style={{ gap: 6 }}>
@@ -92,10 +92,10 @@ export default function RulesPage() {
                       {r.last_run_at ? <StatusPill tone="success">Checked</StatusPill> : <StatusPill>Queued</StatusPill>}
                     </div>
                   </div>
-                  <NextLink href={`/products/${r.product_id}`} className="sr-link sr-truncate" style={{ fontSize: 12, display: "block" }}>
+                  <NextLink href={`/products/${r.product_id}`} className="sr-link" style={{ fontSize: 12, display: "block" }}>
                     {r.product_title || "Product"}
                   </NextLink>
-                  <p className="sr-xs sr-num sr-truncate">
+                  <p className="sr-xs sr-num">
                     {r.include_domains.join(", ")}. Every {r.cadence_hours} h, last run {timeAgo(r.last_run_at)}.
                   </p>
                   {r.last_headline ? <p className="sr-xs">Last finding: {r.last_headline}</p> : null}
