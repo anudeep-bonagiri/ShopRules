@@ -442,13 +442,17 @@ export async function compareListings(account: AccountRow, input: { title: strin
   // The position is arithmetic, not a judgement: median competitor price against the seller's.
   const prices = parsed.listings.map((l) => l.price).filter((p): p is number => typeof p === "number" && Number.isFinite(p) && p > 0).sort((a, b) => a - b);
   let position: CompetitorListings["price_position"] = "unknown";
+  let note = parsed.note;
   if (prices.length && input.price != null && input.price > 0) {
     const median = prices.length % 2 ? prices[(prices.length - 1) / 2] : (prices[prices.length / 2 - 1] + prices[prices.length / 2]) / 2;
     const ratio = input.price / median;
     position = ratio < 0.9 ? "below_market" : ratio > 1.1 ? "above_market" : "at_market";
+    const pct = Math.round(Math.abs(ratio - 1) * 100);
+    const where = position === "above_market" ? `${pct}% above` : position === "below_market" ? `${pct}% below` : "within 10% of";
+    note = `Your ${input.price.toFixed(2)} is ${where} the median of ${median.toFixed(2)} across ${prices.length} listing${prices.length === 1 ? "" : "s"} with a visible price.`;
   }
   await recordRun(account, null, "compare", meter);
-  return { ...parsed, price_position: position, meter };
+  return { ...parsed, note, price_position: position, meter };
 }
 
 // 4. A dismissal with a reason becomes a standing instruction for future checks.
