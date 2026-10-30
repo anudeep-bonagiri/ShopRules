@@ -357,6 +357,8 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
 
   const verified = verifyClaims(check.claims, sources);
   const headline = plain(check.headline).slice(0, 240);
+  // "Effective today" is the model filling a blank, not a date it read.
+  if (check.impact.effective_date === today) check.impact.effective_date = null;
   check.action = {
     ...check.action,
     title: plain(check.action.title),
