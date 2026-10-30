@@ -23,7 +23,16 @@ Returns `{ ok: true, tavily_mode: "keyed" | "keyless", nemotron_configured: bool
 Returns `{ account: { id, token, telegram_configured, settings } }`. Settings: `{ ship_to_states: string[], target_margin_pct: number, unit_cost_pct: number, units_per_week: number, state_sales: Record<string, number>, currency: string }`.
 
 ### `PATCH /api/account`
-Body: partial `{ settings, telegram_chat_id }`. Returns the updated account.
+Body: partial `{ settings, telegram_chat_id }`. Settings also accept `dutiable_share` (0..1), `rounding` (0.5, 0.99, 0.01), `price_change_pct` (0.5..50). Changing `ship_to_states` reseeds the tax rules of every product; the response carries `reseeded`. Returns the updated account.
+
+### `POST /api/account/rotate`
+Issues a new `sr_live_…` token for the workspace and retires the old one. Returns `{ account }` with the new token.
+
+### `POST /api/account/sales-import`
+Body: `{ csv: string }`, a Shopify orders export or an Etsy Orders CSV (detected by headers). Aggregates shipping-state dollars and order counts for the current and previous calendar year into `settings.state_sales_by_year`; stores aggregates only. Returns `{ summary }`.
+
+### `GET /open?token=sr_live_…`
+Sets the workspace cookie for that token in this browser and redirects to `/` (so the same list opens on a phone). An invalid token lands on `/settings?open=invalid`.
 
 ### `GET /api/lookup?url=<listing url>`
 Cheap lookup used by the extension on hover. Returns `{ watched: boolean, product: Product | null, marketplace: string, families_preview: string[] }`. Does not call Tavily or Nemotron.
@@ -47,6 +56,12 @@ Stops watching. Returns `{ ok: true }`.
 ### `POST /api/products/:id/check`
 Body: `{ scope?: "due" | "all" | "tariff" | "safety" | "tax" | "policy", run_id?: string, force?: boolean, max_rules?: number }`. Default scope `due` runs every rule whose cadence elapsed (up to 12, three at a time). For each rule: Tavily Search on official domains, Tavily Extract on the top pages, Nemotron Ultra decides whether the change touches the product (facts only, no price), the verifier drops any claim whose quote is not in the extracted text, and the deterministic guardrails (`docs/GUARDRAILS.md`) audit the verdict. Unchanged sources (same content hash) skip the model. `force` skips that dedupe and costs money; leave it off. The request blocks until the run finishes; pass a `run_id` and poll `GET /api/runs/:run_id` for live progress. Returns `{ alerts: Alert[], checked: number, skipped_unchanged: number, errors: string[], meter, run_id }`.
 
+### `GET /api/nexus`
+Seed nexus thresholds for every jurisdiction plus this workspace's verifications: `{ as_of, seeds: NexusThreshold[], verifications: Record<state, NexusVerification> }`.
+
+### `POST /api/nexus/verify`
+Body: `{ states?: string[] }` (defaults to the ship-to states, max 8). For each state: Tavily Map on the revenue domain, up to three candidate pages extracted, a deterministic parser pulls the dollar and transaction tests with the exact quote (falls back to Crawl of the seed page, then plain Extract). No model is involved. Returns `{ verifications: NexusVerification[], errors, meter }`. Also runs weekly from the cron for up to three stale states per account.
+
 ### `GET /api/runs/:id`
 Live progress of a check or ingest run: `{ run: { id, kind: "check" | "ingest", status: "running" | "done" | "failed", total, done, current: string[] (domains being read), items: [{ rule_id, title, family, domain, status: "queued" | "checking" | "clear" | "unchanged" | "alert" | "error", alert_id? }], steps?: [{ key: "read" | "classify" | "seed", label, status, detail? }], error?, started_at, finished_at } }`. 404 until the run has written its first record.
 
@@ -65,6 +80,15 @@ Body: `{ title: string, price?: number, marketplace?: string, url?: string }`. T
 ### `GET /api/rules`
 Returns `{ rules: Rule[] }` for every product in the workspace, each with `product_title`.
 
+### `PATCH /api/rules/:id`
+Body: `{ paused?: boolean, cadence_hours?: 24 | 72 | 168 }`. Paused rules are skipped by checks and the cron. Returns `{ rule }`.
+
+### `PATCH /api/skills/:id` and `DELETE /api/skills/:id`
+Edit the text of a standing instruction, or delete it. Returns `{ skill }` or `{ ok: true }`.
+
+### `POST /api/products/:id/prices` and `GET /api/products/:id/prices`
+Body: `{ price, currency?, observed_at?, source: "extension" }`. Records a price point when it differs from the last one by at least one cent and raises a `price_change` alert when it moves more than `settings.price_change_pct` (default 3). The extension posts once per product per hour; the daily cron refreshes every watched listing with Tavily Extract (Shopify stores via their public `.json`), no model.
+
 ### `POST /api/products/:id/forge`
 Rule Forge, the coding agent. Body: `{ rule_id?: string, max_iterations?: number }` (defaults: the product's first tariff rule, 3 iterations). Nemotron 3 Ultra writes `check.py` (a deterministic extractor for the one fact the rule is about), Nemotron 3 Nano writes `test_check.py` from the verified facts, a Token Factory Sandbox runs the harness, and Ultra revises on failure. Returns `{ forge: Forge }` with the full step log. Takes 20 to 90 seconds.
 
@@ -73,6 +97,9 @@ Returns `{ forges: Forge[], sandbox: { configured, image } }`.
 
 ### `GET /api/forges/:id` and `DELETE /api/forges/:id`
 One forge record with its code, tests, step log, and sandbox output.
+
+### Rate limits
+`POST /api/products`, `POST /api/products/:id/check`, `POST /api/compare`, and `POST /api/demo/seed` return 429 with a plain message at the daily caps (checks 40, ingests 10, compares 20 on the public deploy; `SR_LIMIT_CHECKS`, `SR_LIMIT_INGESTS`, `SR_LIMIT_COMPARES` override). Compare results are cached per product for 24 h and cache hits are free.
 
 ### `GET /api/receipt`
 Cost receipt for the account: `{ runs: Run[], totals: { tavily_calls, tavily_credits, llm_cost_usd, all_ultra_cost_usd, saved_usd, saved_pct }, by_tier: {...} }`.
@@ -91,6 +118,7 @@ type Product = {
   title: string; price: number | null; currency: string | null; image_url: string | null;
   profile: ProductProfile; // see apps/web/src/lib/schemas.ts; hts_candidates[0].code is a four-digit catalog heading, hts_detail a suggested refinement
   overrides?: { price_override?, unit_cost?, dutiable_share?, units_per_week?, origin_country?, hts_heading?, hts_detail?, for_children?, materials? } | null; // seller-set, see PATCH
+  duty_rate?: { heading; detail; general: string | null; general_pct: number | null; special; column2; quote; verified: boolean; reason; label; url; read_at } | null; // read from hts.usitc.gov with Tavily Extract
   created_at: string; last_checked_at: string | null; open_alerts?: number;
 };
 
@@ -110,6 +138,8 @@ type Alert = {
   action: { type: "reprice" | "compliance_step" | "register_tax" | "review" | "none"; title: string; steps: string[]; suggested_price: number | null; rationale: string };
   pricing: PricingResult | null; // deterministic reprice math, see apps/web/src/lib/pricing.ts
   guardrails?: Array<{ code: string; severity: "drop" | "adjust" | "note"; message: string }>; // see docs/GUARDRAILS.md
+  trail?: SourceTrail | null; // every Tavily call behind the alert, see apps/web/src/lib/source-trail.ts and docs/TAVILY.md
+  kind?: "price"; // price_change alerts raised by the price refresh
   sources: Array<{ url: string; title: string; domain: string }>;
   created_at: string;
 };
