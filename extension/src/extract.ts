@@ -101,7 +101,7 @@ export function extractPageProduct(market: Marketplace, doc: Document = document
     price: firstValue(layers, "price"),
     currency: firstValue(layers, "currency"),
     description,
-    materials: firstValue(layers, "materials") ?? materialsFromText(description),
+    materials: splitMaterials(firstValue(layers, "materials") ?? materialsFromText(description)),
     image: firstValue(layers, "image"),
   };
 }
@@ -118,7 +118,10 @@ function pageTitle(doc: Document): string | null {
 
 type Field = Exclude<keyof PageProduct, "url">;
 
-function firstValue<K extends Field>(layers: Array<Partial<PageProduct>>, key: K): PageProduct[K] | null {
+// Raw layer: materials is still the text the markup gave us; it is split once at the end.
+type Layer = Partial<Omit<PageProduct, "materials">> & { materials?: string | null };
+
+function firstValue<K extends Field>(layers: Layer[], key: K): NonNullable<Layer[K]> | null {
   for (const layer of layers) {
     const value = layer[key];
     if (value !== undefined && value !== null && value !== "") return value;
@@ -180,7 +183,7 @@ function ldList(value: any): string | null {
   return str(value);
 }
 
-function fromJsonLd(doc: Document): Partial<PageProduct> {
+function fromJsonLd(doc: Document): Layer {
   const node = findLdProduct(doc);
   if (!node) return {};
   const offer = firstOffer(node.offers);
@@ -197,7 +200,7 @@ function fromJsonLd(doc: Document): Partial<PageProduct> {
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-function fromOpenGraph(doc: Document): Partial<PageProduct> {
+function fromOpenGraph(doc: Document): Layer {
   const priceText = meta(doc, 'meta[property="og:price:amount"]') ?? meta(doc, 'meta[property="product:price:amount"]');
   return {
     title: meta(doc, 'meta[property="og:title"]'),
@@ -211,7 +214,7 @@ function fromOpenGraph(doc: Document): Partial<PageProduct> {
   };
 }
 
-function fromSelectors(market: Marketplace, doc: Document): Partial<PageProduct> {
+function fromSelectors(market: Marketplace, doc: Document): Layer {
   switch (market) {
     case "amazon": {
       const priceText = firstText(doc, [
@@ -415,6 +418,17 @@ export function currencyFromText(raw: string | null | undefined): string | null 
 function materialsFromText(description: string | null): string | null {
   const m = description?.match(/\bmaterials?\s*[:\-]\s*([^\n.;|]{2,120})/i);
   return clean(m?.[1]) ?? null;
+}
+
+// "Beech wood, water-based paint; cotton" -> ["beech wood", "water-based paint", "cotton"].
+export function splitMaterials(raw: string | null | undefined): string[] | null {
+  if (!raw) return null;
+  const parts = raw
+    .split(/[,;|/]|\band\b|\s{2,}/i)
+    .map((p) => p.replace(/^\s*(?:made (?:of|from|with)\s*)?/i, "").trim().toLowerCase())
+    .filter((p) => p.length >= 2 && p.length <= 40);
+  const unique = Array.from(new Set(parts)).slice(0, 10);
+  return unique.length ? unique : null;
 }
 
 // DOM helpers

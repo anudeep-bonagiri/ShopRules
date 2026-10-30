@@ -321,13 +321,13 @@ function listingId(url: string, market: Marketplace): string | null {
   return pattern ? (url.match(pattern)?.[1] ?? null) : null;
 }
 
-function toPayload(page: PageProduct): PagePayload {
-  const payload: PagePayload = {};
+function toPayload(page: PageProduct, marketplace: Marketplace): PagePayload {
+  const payload: PagePayload = { marketplace };
   if (page.title) payload.title = page.title;
   if (page.price !== null) payload.price = page.price;
   if (page.currency) payload.currency = page.currency;
   if (page.description) payload.description = page.description;
-  if (page.materials) payload.materials = page.materials;
+  if (page.materials?.length) payload.materials = page.materials;
   if (page.image) payload.image = page.image;
   return payload;
 }
@@ -1073,7 +1073,7 @@ export class Panel {
     if (!s || s.busy) return;
     const seq = this.seq;
     this.update({ busy: "watch", actionError: null, notice: null });
-    const result = await this.send<WatchResponse>({ type: "watch", url: s.page.url, page: toPayload(s.page) });
+    const result = await this.send<WatchResponse>({ type: "watch", url: s.page.url, page: toPayload(s.page, s.marketplace) });
     if (!this.current(seq)) return;
     if (!result.ok) {
       this.update({ busy: null, actionError: result.error });
@@ -1092,7 +1092,7 @@ export class Panel {
     if (!s || !id || s.busy) return;
     const seq = this.seq;
     this.update({ busy: "check", actionError: null, notice: null });
-    const result = await this.send<CheckResponse>({ type: "check", id, force: true });
+    const result = await this.send<CheckResponse>({ type: "check", id });
     if (!this.current(seq)) return;
     if (!result.ok) {
       this.update({ busy: null, actionError: result.error });

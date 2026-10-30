@@ -209,8 +209,9 @@ export interface PagePayload {
   price?: number;
   currency?: string;
   description?: string;
-  materials?: string;
+  materials?: string[];
   image?: string;
+  marketplace?: string;
 }
 
 export interface CompareRequest {
@@ -227,7 +228,7 @@ export interface PageProduct {
   price: number | null;
   currency: string | null;
   description: string | null;
-  materials: string | null;
+  materials: string[] | null;
   image: string | null;
 }
 
