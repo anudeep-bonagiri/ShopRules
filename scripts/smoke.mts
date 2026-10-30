@@ -29,10 +29,20 @@ function loadPlaywright(): typeof import("playwright") {
   }
   const npx = join(homedir(), ".npm", "_npx");
   if (existsSync(npx)) for (const d of readdirSync(npx)) candidates.push(join(npx, d, "node_modules", "playwright"));
+  let firstFound: typeof import("playwright") | null = null;
   for (const c of candidates) {
-    if (existsSync(join(c, "package.json"))) return req(c) as typeof import("playwright");
+    if (!existsSync(join(c, "package.json"))) continue;
+    const pw = req(c) as typeof import("playwright");
+    firstFound ??= pw;
+    // Prefer a copy whose Chromium build is actually downloaded.
+    try {
+      if (existsSync(pw.chromium.executablePath())) return pw;
+    } catch {
+      // keep looking
+    }
   }
-  throw new Error("Playwright not found. Run: npx -y playwright@1.64.1 install chromium, or set PLAYWRIGHT_PATH to a playwright package directory.");
+  if (firstFound) return firstFound; // will print Playwright's own "run npx playwright install" hint
+  throw new Error("Playwright not found. Run: npx -y playwright install chromium, or set PLAYWRIGHT_PATH to a playwright package directory.");
 }
 
 function readEnvLocal(): Record<string, string> {
@@ -64,13 +74,38 @@ async function waitFor(url: string, ms: number): Promise<void> {
   throw new Error(`${url} did not come up within ${ms} ms`);
 }
 
+let server: ChildProcess | null = null;
+function stopServer(): void {
+  if (!server?.pid) return;
+  try {
+    process.kill(-server.pid, "SIGTERM"); // whole process group: npx -> next -> workers
+  } catch {
+    server.kill("SIGTERM");
+  }
+  server = null;
+}
+process.on("exit", stopServer);
+process.on("SIGINT", () => {
+  stopServer();
+  process.exit(130);
+});
+
+async function portBusy(port: number): Promise<boolean> {
+  try {
+    await fetch(`http://localhost:${port}/api/health`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function main(): Promise<void> {
   mkdirSync(shots, { recursive: true });
   const { chromium } = loadPlaywright();
-  let server: ChildProcess | null = null;
   if (!baseArg) {
+    if (await portBusy(PORT)) throw new Error(`Port ${PORT} is already in use. Stop that server (lsof -ti :${PORT} | xargs kill) or pass --base to test it instead.`);
     const env = { ...process.env, ...readEnvLocal(), PORT: String(PORT), NEXT_TELEMETRY_DISABLED: "1" };
-    server = spawn("npx", ["next", "dev", "-p", String(PORT)], { cwd: join(root, "apps", "web"), env, stdio: ["ignore", "pipe", "pipe"] });
+    server = spawn("npx", ["next", "dev", "-p", String(PORT)], { cwd: join(root, "apps", "web"), env, stdio: ["ignore", "pipe", "pipe"], detached: true });
     server.stdout?.on("data", (d) => process.env.SMOKE_VERBOSE && process.stdout.write(d));
     server.stderr?.on("data", (d) => process.stderr.write(d));
     await waitFor(`${BASE}/api/health`, 90_000);
@@ -157,9 +192,12 @@ async function main(): Promise<void> {
   if (overflow > 2) failures.push(`Horizontal overflow of ${overflow}px at 390 wide`);
 
   await browser.close();
-  if (!args.includes("--keep")) server?.kill("SIGTERM");
+  if (args.includes("--keep")) server = null; // leave it running for a manual look
+  else stopServer();
 
-  if (consoleErrors.length) failures.push(`Console errors:\n  ${Array.from(new Set(consoleErrors)).slice(0, 10).join("\n  ")}`);
+  const relevantErrors = health.storage_configured ? consoleErrors : consoleErrors.filter((e) => !/status of 500/.test(e));
+  if (!health.storage_configured) console.warn("smoke: storage is not configured, so API 500s are expected and not counted; add apps/web/.env.local for a full run.");
+  if (relevantErrors.length) failures.push(`Console errors:\n  ${Array.from(new Set(relevantErrors)).slice(0, 10).join("\n  ")}`);
   console.log(`smoke: ${pages.length + 2} pages visited, ${products.length} products, screenshots in docs/design/shots/`);
   if (failures.length) {
     console.error(`smoke: FAILED\n- ${failures.join("\n- ")}`);
