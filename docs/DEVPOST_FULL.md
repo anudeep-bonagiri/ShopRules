@@ -1,6 +1,6 @@
 # Shop Rules: Devpost submission, every field
 
-> Every number below is copied from `docs/FACTS.md` (run of 2026-10-30T02:22:02Z) unless it is listed in `docs/numbers_allowed.txt`. Re-run `scripts/facts.mts` before the final paste and refresh the numbers marked FACTS.
+> Every number below is copied from `docs/FACTS.md` (run of 2026-10-30T02:26Z, after the Tavily domain-mode fix) unless it is listed in `docs/numbers_allowed.txt`. Re-run `scripts/facts.mts` once the sandbox project id is set and refresh the numbers marked FACTS.
 
 ---
 
@@ -40,7 +40,7 @@ Paste a listing URL (or press Alt+Shift+S on the listing with the Chrome extensi
 The moment, as a judge can replay it:
 
 1. Open the demo, click "Load demo shop". A wooden stacking toy made in China, a USB desk lamp with a lithium battery, and an organic cotton tee are watched; the toy's rules run (FACTS: 12 rules seeded for the toy, 4 tariff, 3 safety, 4 tax, 1 policy).
-2. Open the toy. The de minimis alert reads: "The de minimis exemption for low-value imports from China has been suspended since May 2025, so duties now apply to every shipment regardless of value." Evidence: 3 proposed, 3 backed, 0 rejected, every source on federalregister.gov (FACTS).
+2. Open the toy. The de minimis alert reads: "The de minimis exemption for low-value imports from China has been suspended since May 2025, so your $34 wooden toy now incurs duty and formal entry costs on every shipment." Evidence: 4 proposed, 4 backed, 0 rejected, every source on federalregister.gov. Across the four tariff rules of the first check: 12 claims proposed, 10 backed, 2 rejected by the verifier and shown as rejected (FACTS).
 3. Click a claim. The quote is the sentence from the Federal Register notice. Click the source; it opens.
 4. Click "Forge a check". Nemotron 3 Ultra writes `check.py`, Nemotron 3 Nano writes the tests from the backed facts, a Token Factory sandbox runs them, and the forge page shows each step with its model and timing.
 5. Dismiss the Prop 65 alert with "we already print the warning". The next check carries that instruction.
@@ -87,13 +87,13 @@ Pick one track on Devpost. Recommendation: Personal AI Track with Best Use of Ta
 
 ### What we got wrong
 
-Rule Forge's sandbox step depends on the Token Factory project id being set on the deployment; where it is not, the forge card says "Not run" and shows the code and tests anyway. The verifier checks that a quote exists, not that it supports the claim, so a confidently misread sentence can pass; that is why rejected claims stay visible and every source is one click away. The cost saving from routing is modest on a single cycle (FACTS: 11 percent) because the decision step on Ultra dominates; it grows with the Nano-heavy parts (classification, compare, skills) a seller actually uses day to day. Prices are list prices from third-party trackers until replaced with the invoice.
+Rule Forge's sandbox step depends on the Token Factory project id being set on the deployment; where it is not, the forge card says "Not run" and shows the code and tests anyway. The verifier checks that a quote exists, not that it supports the claim, so a confidently misread sentence can pass; that is why rejected claims stay visible and every source is one click away. The cost saving from routing is modest on a single cycle (FACTS: 5 percent) because the decision step on Ultra dominates; it grows with the Nano-heavy parts (classification, compare, skills) a seller actually uses day to day. Prices are list prices from third-party trackers until replaced with the invoice.
 
 ### Accomplishments that we're proud of
 
-- 3 of 3 claims backed by the extracted source text on the first measured check, all from federalregister.gov, in 12.7 seconds for 4 rules (FACTS).
-- One Nemotron Nano call classified a listing into origin, HTS candidate, and the rule set in 6.2 seconds (FACTS).
-- A coding agent that produces a 49-line deterministic extractor and 5 tests for a tariff rule in 11.1 seconds of model time (FACTS), with every step logged.
+- 10 of 12 claims backed by the extracted source text on the first measured check, the other 2 rejected and shown, in 18.3 seconds for 4 rules, with 5 of the 7 source domains on .gov (FACTS).
+- One Nemotron Nano call classified a listing into origin, HTS candidate, and the rule set in 3.5 seconds (FACTS).
+- A coding agent that produces a 61-line deterministic extractor and 3 tests for a tariff rule in 12.2 seconds (FACTS), with every step logged.
 
 ### What we learned
 
