@@ -319,6 +319,7 @@ export async function deleteAccount(id: string): Promise<void> {
   const versions = await listVersions(id);
   const urls = versions.map((v) => v.url);
   if (ws) urls.push(tokenPath(ws.account.token));
+  urls.push(legacyPath(id));
   if (urls.length) await del(urls);
 }
 
