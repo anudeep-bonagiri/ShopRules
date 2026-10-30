@@ -29,6 +29,8 @@ The product page with the de minimis alert open: the accent card, the evidence c
 | **Code** | https://github.com/anudeep-bonagiri/ShopRules |
 | **Extension** | packaged build at `extension/shop-rules-extension.zip` in the repo, loads unpacked |
 
+Numbers marked (FACTS) are copied from `docs/FACTS.md`, written by one measured run of 2026-10-30T04:42:00Z against the live APIs; the file, the script that wrote it, and the planted fixture it scores the verifier on are all in the repo.
+
 ### Inspiration
 
 A solo seller on Etsy, Shopify, or Amazon is also the import compliance officer, the product safety officer, and the sales-tax department. Tariff rates on the goods they import changed repeatedly this year, de minimis treatment for low-value imports from China was suspended, and every state has its own nexus threshold. The information is public, on government pages, and nobody has time to read it for every product. The seller we built this for would rather be told "this rule touches this listing, here is the sentence, here is the new price" than be sent a newsletter.
