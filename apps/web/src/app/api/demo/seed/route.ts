@@ -72,14 +72,18 @@ export async function POST() {
         errors.push(err instanceof Error ? err.message : String(err));
       }
     }
+    // First check: the two tariff rules of each new product (origin and, for
+    // China, Section 301), so the first screen shows a real verified alert.
     let alerts = 0;
-    if (products[0] && fresh > 0) {
-      try {
-        const r = await runChecks(account, products[0], { maxRules: 3 });
-        alerts = r.alerts.length;
-        errors.push(...r.errors);
-      } catch (err) {
-        errors.push(err instanceof Error ? err.message : String(err));
+    if (fresh > 0) {
+      for (const product of products) {
+        try {
+          const r = await runChecks(account, product, { scope: "tariff", maxRules: 2 });
+          alerts += r.alerts.length;
+          errors.push(...r.errors);
+        } catch (err) {
+          errors.push(err instanceof Error ? err.message : String(err));
+        }
       }
     }
     return json({ products, alerts, errors });

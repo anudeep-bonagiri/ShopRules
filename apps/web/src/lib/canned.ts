@@ -141,7 +141,12 @@ export function cannedSearch(params: TavilySearchParams, meter?: Meter): TavilyS
   if (meter) meter.tavily_calls += 1;
   const q = tokenSet(params.query);
   const scored = cases.cases
-    .map((c: Case) => ({ c, score: overlap(q, tokenSet(`${c.rule.title} ${c.rule.query} ${c.product} ${cases.products[c.product as keyof typeof cases.products].title}`)) }))
+    .map((c: Case) => {
+      const productTokens = tokenSet(cases.products[c.product as keyof typeof cases.products].title);
+      const productHit = overlap(q, productTokens);
+      const ruleHit = overlap(q, tokenSet(`${c.rule.title} ${c.rule.query}`));
+      return { c, score: productHit > 0 ? productHit + ruleHit : 0 };
+    })
     .filter((x) => x.score >= 3 && x.c.sources.some((s) => inDomains(s.url, params.include_domains)))
     .sort((a, b) => b.score - a.score);
   const results = scored.slice(0, 2).flatMap((x) =>

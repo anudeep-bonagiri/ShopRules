@@ -126,6 +126,7 @@ async function main(): Promise<void> {
   page.on("pageerror", (err) => consoleErrors.push(`pageerror: ${err.message}`));
 
   const shot = async (name: string) => {
+    await page.waitForSelector(".sr-skel", { state: "detached", timeout: 20_000 }).catch(() => undefined);
     await page.waitForTimeout(400);
     await page.screenshot({ path: join(shots, `${name}.png`), fullPage: true });
   };
