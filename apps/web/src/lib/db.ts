@@ -99,6 +99,43 @@ export interface PriceRow {
   at: string;
 }
 
+// Rule Forge: a check written as code by the agent, run and tested in a sandbox.
+export interface ForgeStep {
+  kind: "sources" | "write" | "tests" | "run" | "revise";
+  title: string;
+  detail: string;
+  at: string;
+  ms?: number;
+  model?: "nano" | "super" | "ultra";
+  ok?: boolean;
+  code?: string;
+  operation_id?: string;
+  output?: Record<string, unknown>;
+}
+
+export interface ForgeRow {
+  id: string;
+  account_id: string;
+  product_id: string;
+  rule_id: string;
+  rule_title: string;
+  fact_name: string;
+  status: "passed" | "failed" | "unrun";
+  iterations: number;
+  code: string;
+  tests: string;
+  sources: Array<{ url: string; title: string }>;
+  last_output: Record<string, unknown> | null;
+  steps: ForgeStep[];
+  sandbox_image: string;
+  sandbox_note: string | null;
+  llm_cost_usd: number;
+  tavily_calls: number;
+  duration_ms: number;
+  created_at: string;
+  product_title?: string;
+}
+
 interface Workspace {
   version: number;
   account: AccountRow;
@@ -108,6 +145,7 @@ interface Workspace {
   runs: RunRow[];
   skills: SkillRow[];
   prices: PriceRow[];
+  forges?: ForgeRow[];
 }
 
 const ACCESS = { access: "private" as const };
@@ -496,6 +534,39 @@ export async function listSkills(accountId: string, productId?: string): Promise
 export async function deleteSkill(accountId: string, id: string): Promise<void> {
   await mutate(accountId, (ws) => {
     ws.skills = ws.skills.filter((s) => s.id !== id);
+  });
+}
+
+// Rule Forge records
+
+export async function insertForge(row: ForgeRow): Promise<ForgeRow> {
+  return mutate(row.account_id, (ws) => {
+    ws.forges = ws.forges ?? [];
+    ws.forges.push(row);
+    if (ws.forges.length > 100) ws.forges = ws.forges.slice(-100);
+    return row;
+  });
+}
+
+export async function listForges(accountId: string, productId?: string): Promise<ForgeRow[]> {
+  const ws = await requireWorkspace(accountId);
+  const titles = new Map(ws.products.map((p) => [p.id, p.title]));
+  let rows = [...(ws.forges ?? [])];
+  if (productId) rows = rows.filter((f) => f.product_id === productId);
+  rows.sort((a, b) => b.created_at.localeCompare(a.created_at));
+  return rows.map((f) => ({ ...f, product_title: titles.get(f.product_id) }));
+}
+
+export async function getForge(accountId: string, id: string): Promise<ForgeRow | null> {
+  const ws = await requireWorkspace(accountId);
+  const f = (ws.forges ?? []).find((x) => x.id === id);
+  if (!f) return null;
+  return { ...f, product_title: ws.products.find((p) => p.id === f.product_id)?.title };
+}
+
+export async function deleteForge(accountId: string, id: string): Promise<void> {
+  await mutate(accountId, (ws) => {
+    ws.forges = (ws.forges ?? []).filter((f) => f.id !== id);
   });
 }
 

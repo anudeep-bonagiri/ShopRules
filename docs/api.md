@@ -59,6 +59,15 @@ Body: `{ title: string, price?: number, marketplace?: string, url?: string }`. T
 ### `GET /api/rules`
 Returns `{ rules: Rule[] }` for every product in the workspace, each with `product_title`.
 
+### `POST /api/products/:id/forge`
+Rule Forge, the coding agent. Body: `{ rule_id?: string, max_iterations?: number }` (defaults: the product's first tariff rule, 3 iterations). Nemotron 3 Ultra writes `check.py` (a deterministic extractor for the one fact the rule is about), Nemotron 3 Nano writes `test_check.py` from the verified facts, a Token Factory Sandbox runs the harness, and Ultra revises on failure. Returns `{ forge: Forge }` with the full step log. Takes 20 to 90 seconds.
+
+### `GET /api/forges?product_id=`
+Returns `{ forges: Forge[], sandbox: { configured, image } }`.
+
+### `GET /api/forges/:id` and `DELETE /api/forges/:id`
+One forge record with its code, tests, step log, and sandbox output.
+
 ### `GET /api/receipt`
 Cost receipt for the account: `{ runs: Run[], totals: { tavily_calls, tavily_credits, llm_cost_usd, all_ultra_cost_usd, saved_usd, saved_pct }, by_tier: {...} }`.
 
@@ -94,6 +103,14 @@ type Alert = {
   action: { type: "reprice" | "compliance_step" | "register_tax" | "review" | "none"; title: string; steps: string[]; suggested_price: number | null; rationale: string };
   sources: Array<{ url: string; title: string; domain: string }>;
   created_at: string;
+};
+
+type Forge = {
+  id: string; product_id: string; rule_id: string; rule_title: string; fact_name: string;
+  status: "passed" | "failed" | "unrun"; iterations: number; code: string; tests: string;
+  sources: Array<{ url: string; title: string }>; last_output: Record<string, unknown> | null;
+  steps: Array<{ kind: "sources" | "write" | "tests" | "run" | "revise"; title: string; detail: string; at: string; ms?: number; model?: "nano" | "super" | "ultra"; ok?: boolean; code?: string; operation_id?: string; output?: Record<string, unknown> }>;
+  sandbox_image: string; sandbox_note: string | null; llm_cost_usd: number; tavily_calls: number; duration_ms: number; created_at: string;
 };
 
 type PricePoint = { at: string; price: number; currency: string | null; source: "listing" | "extension" | "check" };

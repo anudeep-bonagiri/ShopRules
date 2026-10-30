@@ -180,6 +180,15 @@ export async function ingestProduct(account: AccountRow, rawUrl: string, page?: 
   return { product: bundle.product, rules: bundle.rules, meter, existing: bundle.existing };
 }
 
+// Model prose for the UI: no em or en dashes, single spaces.
+function plain(text: string): string {
+  return text
+    .replace(/\s*[—–]\s*/g, ", ")
+    .replace(/\s+,/g, ",")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 function firstImage(markdown: string): string | null {
   const m = markdown.match(/!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/);
   return m ? m[1] : null;
@@ -336,7 +345,14 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
   );
 
   const verified = verifyClaims(check.claims, sources);
-  const headline = check.headline.slice(0, 240);
+  const headline = plain(check.headline).slice(0, 240);
+  check.action = {
+    ...check.action,
+    title: plain(check.action.title),
+    rationale: plain(check.action.rationale),
+    steps: check.action.steps.map(plain),
+  };
+  for (const c of verified.claims) c.claim = plain(c.claim);
   const patch: RuleOutcome["patch"] = {
     last_run_at: ranAt,
     last_hash: hash,
