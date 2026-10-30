@@ -1,21 +1,46 @@
-import { del, get, list, put } from "@vercel/blob";
 import postgres from "postgres";
-import type { Marketplace, ProductProfile, RuleFamily, VerifiedClaim } from "./schemas";
+import { del, get, list, put } from "./blob";
+import { offlineMode } from "./offline";
+import type { CompetitorListings, Marketplace, ProductProfile, RuleFamily, VerifiedClaim } from "./schemas";
 import type { RuleSpec } from "./rules-catalog";
+import type { PricingResult } from "./pricing";
+import type { GuardrailIssue } from "./sanity";
+import type { ProductOverrides } from "./product";
+import type { SourceTrail } from "./source-trail";
+import type { HtsRateResult } from "./hts-rate";
+import type { NexusVerification } from "./nexus-crawl";
+import { decideQuota, limitFor, pruneUsage, usageKey, type LimitKind, type QuotaDecision } from "./limits";
 
-// Server-only data layer. Each workspace (account) is one private JSON document
-// in Vercel Blob. Every write creates a new immutable version file under
-// accounts/<id>/ and the newest version is resolved through the listing API,
-// which is consistent right after a write (overwriting one pathname is not:
-// reads can lag by seconds). Old versions are pruned in the background.
-// Swap this file for a SQL implementation if you self-host; apps/web/supabase/
-// migration.sql has the equivalent schema.
+// Server-only data layer. Each workspace (account) is one JSON document: a
+// Postgres row (DATABASE_URL, apps/web/supabase/store.sql) or, on the alternative
+// backend, immutable version files under accounts/<id>/ in Vercel Blob (or the
+// file-backed store in demo mode). Every write is compare-and-swap on the
+// document version. The relational sketch in apps/web/supabase/migration.sql is
+// for splitting the document later.
 
 export interface AccountRow {
   id: string;
   token: string;
   telegram_chat_id: string | null;
-  settings: { ship_to_states?: string[]; target_margin_pct?: number; currency?: string; unit_cost_pct?: number; units_per_week?: number; state_sales?: Record<string, number> };
+  settings: {
+    ship_to_states?: string[];
+    target_margin_pct?: number;
+    currency?: string;
+    unit_cost_pct?: number;
+    units_per_week?: number;
+    /** 0..1 share of landed cost that is customs value. */
+    dutiable_share?: number;
+    rounding?: 0.5 | 0.99 | 0.01;
+    /** Price move (percent) that raises a price_change alert. */
+    price_change_pct?: number;
+    /** Current-year dollars per state, typed by hand or set from the import. */
+    state_sales?: Record<string, number>;
+    /** From the orders CSV import: year -> state -> dollars and order count. Aggregates only. */
+    state_sales_by_year?: Record<string, Record<string, { dollars: number; orders: number }>>;
+    sales_import?: { source: "shopify" | "etsy"; imported_at: string; orders_seen: number; years: number[] } | null;
+  };
+  /** Daily counters for the paid endpoints, keyed YYYY-MM-DD:kind. See limits.ts. */
+  usage?: Record<string, number>;
   created_at: string;
 }
 
@@ -29,10 +54,18 @@ export interface ProductRow {
   currency: string | null;
   image_url: string | null;
   profile: ProductProfile;
+  /** Seller-set fields; see product.ts. The classifier never writes here. */
+  overrides?: ProductOverrides | null;
+  /** General duty rate read from hts.usitc.gov for the product's heading (hts-rate.ts). */
+  duty_rate?: HtsRateResult | null;
+  /** Last competitor search, kept 24 h because it is a paid call. */
+  compare_cache?: { at: string; result: CompetitorListings & { price_position: string } } | null;
   extracted_text: string | null;
   created_at: string;
   last_checked_at: string | null;
   open_alerts?: number;
+  /** Last 30 price points, oldest first, for list views (sparkline and change since first seen). */
+  price_points?: Array<{ at: string; price: number }>;
 }
 
 export interface RuleRow extends RuleSpec {
@@ -42,6 +75,8 @@ export interface RuleRow extends RuleSpec {
   last_run_at: string | null;
   last_hash: string | null;
   last_headline: string | null;
+  /** Paused rules are skipped by checks and cron until resumed. */
+  paused?: boolean;
   created_at: string;
 }
 
@@ -52,6 +87,10 @@ export interface AlertRow {
   rule_id: string;
   status: "new" | "dismissed" | "actioned";
   family: RuleFamily;
+  /** rule (default): raised by a rule check. price: raised by price tracking (prices.ts). */
+  kind?: "rule" | "price";
+  /** Set on kind "price". */
+  price_change?: { old_price: number; new_price: number; delta: number; pct: number } | null;
   severity: "high" | "medium" | "low";
   relevance: "affects" | "might_affect";
   headline: string;
@@ -59,8 +98,23 @@ export interface AlertRow {
   proposed: number;
   backed: number;
   rejected: number;
-  impact: { severity: string; effective_date: string | null; tariff_rate_change_pct: number | null; estimated_cost_change_pct: number | null; hash?: string };
+  impact: {
+    severity: string;
+    effective_date: string | null;
+    tariff_rate_change_pct: number | null;
+    estimated_cost_change_pct: number | null;
+    hash?: string;
+    /** Sales-tax rules: the threshold the quote states, kept only when the guard found the numbers in a backed quote. */
+    nexus?: { dollars: number | null; transactions: number | null; operator: "or" | "and" | null } | null;
+    nexus_verified?: boolean;
+  };
   action: { type: string; title: string; steps: string[]; suggested_price: number | null; rationale: string };
+  /** Deterministic reprice math computed server-side from the alert facts (pricing.ts). Absent on alerts older than this field. */
+  pricing?: PricingResult | null;
+  /** What the deterministic guardrails changed on the model's verdict before this alert was raised (sanity.ts). */
+  guardrails?: GuardrailIssue[];
+  /** Every Tavily call behind this alert and the passages the verifier matched (source-trail.ts). */
+  trail?: SourceTrail | null;
   sources: Array<{ url: string; title: string; domain: string }>;
   dismiss_reason: string | null;
   created_at: string;
@@ -79,6 +133,8 @@ export interface RunRow {
   llm_cost_usd: number;
   all_ultra_cost_usd: number;
   duration_ms: number;
+  /** Compare-and-swap retries seen while this run was writing. */
+  conflicts?: number;
   created_at: string;
 }
 
@@ -147,6 +203,8 @@ interface Workspace {
   skills: SkillRow[];
   prices: PriceRow[];
   forges?: ForgeRow[];
+  /** Nexus thresholds verified on the state revenue sites with Tavily Map, Crawl, and Extract. */
+  nexus_verifications?: Record<string, NexusVerification>;
 }
 
 const ACCESS = { access: "private" as const };
@@ -154,29 +212,36 @@ const MAX_RUNS = 400;
 const KEEP_VERSIONS = 3;
 
 // Two document stores share one interface. Postgres (DATABASE_URL) is the
-// default when set: one row per workspace, read in one query, written with an
-// optimistic version check. Vercel Blob (BLOB_READ_WRITE_TOKEN) keeps immutable
-// versions and lists them to find the newest, which Vercel bills as an advanced
-// operation per read and suspends on the Hobby plan past a threshold (D-12).
+// default when set: one row per workspace, read in one query, written with a
+// compare-and-swap version check. Vercel Blob (BLOB_READ_WRITE_TOKEN) keeps
+// immutable versions named by version number so a write is create-only (the
+// same compare-and-swap, D-14) and lists them to find the newest; in development
+// without a token the identical code runs on the file-backed store in blob.ts
+// (demo mode). Vercel bills a list as an advanced operation and suspended the
+// Blob store on the Hobby plan, which is why Postgres is the default (D-17).
 
 interface DocStore {
-  name: "postgres" | "blob";
   load(id: string): Promise<Workspace | null>;
-  save(id: string, ws: Workspace): Promise<void>;
+  /** Writes ws, whose version is already expectedVersion + 1; throws WriteConflict when the store moved on. */
+  save(id: string, ws: Workspace, expectedVersion: number): Promise<void>;
   remove(id: string, token: string | null): Promise<void>;
   ids(): Promise<string[]>;
   tokenGet(token: string): Promise<string | null>;
   tokenSet(token: string, accountId: string): Promise<void>;
+  tokenDel(token: string): Promise<void>;
+}
+
+const forcedLocal = () => process.env.SR_OFFLINE === "1" || process.env.SR_LOCAL_STORE === "1";
+
+export function storeName(): "postgres" | "blob" | "local" | "none" {
+  if (!forcedLocal() && process.env.DATABASE_URL) return "postgres";
+  if (offlineMode().store === "local") return "local";
+  if (process.env.BLOB_READ_WRITE_TOKEN) return "blob";
+  return "none";
 }
 
 export function dbConfigured(): boolean {
-  return Boolean(process.env.DATABASE_URL || process.env.BLOB_READ_WRITE_TOKEN);
-}
-
-export function storeName(): "postgres" | "blob" | "none" {
-  if (process.env.DATABASE_URL) return "postgres";
-  if (process.env.BLOB_READ_WRITE_TOKEN) return "blob";
-  return "none";
+  return storeName() !== "none";
 }
 
 function requireDb(): void {
@@ -200,6 +265,20 @@ export function newToken(): string {
   return "sr_live_" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// Conflicts seen by this server instance since the last run record was written.
+let conflictCounter = 0;
+export function takeConflicts(): number {
+  const n = conflictCounter;
+  conflictCounter = 0;
+  return n;
+}
+
+class WriteConflict extends Error {
+  constructor(id: string, version: number) {
+    super(`Workspace ${id} version ${version} was written by someone else`);
+  }
+}
+
 // Postgres store
 
 let sqlClient: ReturnType<typeof postgres> | null = null;
@@ -218,22 +297,22 @@ function sql(): ReturnType<typeof postgres> {
 }
 
 const pgStore: DocStore = {
-  name: "postgres",
   async load(id) {
     const rows = await sql()<Array<{ doc: Workspace | string }>>`select doc from workspaces where id = ${id}`;
     const doc = rows[0]?.doc;
     if (doc == null) return null;
     return typeof doc === "string" ? (JSON.parse(doc) as Workspace) : doc;
   },
-  async save(id, ws) {
+  async save(id, ws, expectedVersion) {
+    // Insert when the row is new; otherwise update only if nobody moved the version.
     const rows = await sql()<Array<{ id: string }>>`
       insert into workspaces (id, doc, version, updated_at)
       values (${id}, ${sql().json(ws as unknown as postgres.JSONValue)}, ${ws.version}, now())
       on conflict (id) do update
         set doc = excluded.doc, version = excluded.version, updated_at = now()
-        where workspaces.version < excluded.version
+        where workspaces.version = ${expectedVersion}
       returning id`;
-    if (!rows.length) throw new Error(`Workspace ${id} changed underneath this write (version ${ws.version})`);
+    if (!rows.length) throw new WriteConflict(id, ws.version);
   },
   async remove(id) {
     await sql()`delete from tokens where account_id = ${id}`;
@@ -250,18 +329,23 @@ const pgStore: DocStore = {
   async tokenSet(token, accountId) {
     await sql()`insert into tokens (token, account_id) values (${token}, ${accountId}) on conflict (token) do update set account_id = excluded.account_id`;
   },
+  async tokenDel(token) {
+    await sql()`delete from tokens where token = ${token}`;
+  },
 };
 
-// Vercel Blob store
+// Vercel Blob store (or the file-backed store from blob.ts in demo mode)
 
 const accountDir = (id: string) => `accounts/${id}/`;
 const legacyPath = (id: string) => `accounts/${id}.json`;
 const tokenPath = (token: string) => `tokens/${token}.json`;
 
-function versionName(id: string): string {
-  const stamp = String(Date.now()).padStart(14, "0");
-  const rand = Math.random().toString(36).slice(2, 6);
-  return `${accountDir(id)}${stamp}-${rand}.json`;
+// Version files are named by the document version so a write is create-only:
+// two writers that both read version N and try to create v(N+1) cannot both
+// succeed. The "v" prefix sorts after the legacy "<timestamp>-<rand>.json"
+// names, so the newest version is still the lexicographically last blob.
+function versionName(id: string, version: number): string {
+  return `${accountDir(id)}v${String(version).padStart(12, "0")}.json`;
 }
 
 async function readBlob<T>(pathOrUrl: string): Promise<T | null> {
@@ -298,7 +382,6 @@ async function pruneVersions(id: string): Promise<void> {
 }
 
 const blobStore: DocStore = {
-  name: "blob",
   async load(id) {
     const versions = await listVersions(id);
     const newest = versions.at(-1);
@@ -307,7 +390,15 @@ const blobStore: DocStore = {
     return readBlob<Workspace>(legacyPath(id));
   },
   async save(id, ws) {
-    await put(versionName(id), JSON.stringify(ws), { ...ACCESS, addRandomSuffix: false, contentType: "application/json", cacheControlMaxAge: 0 });
+    const name = versionName(id, ws.version);
+    try {
+      // No allowOverwrite: the store refuses the put when this version already exists.
+      await put(name, JSON.stringify(ws), { ...ACCESS, addRandomSuffix: false, allowOverwrite: false, contentType: "application/json", cacheControlMaxAge: 0 });
+    } catch (err) {
+      const exists = (await listVersions(id)).some((v) => v.pathname === name);
+      if (exists) throw new WriteConflict(id, ws.version);
+      throw err;
+    }
     void pruneVersions(id).catch(() => undefined);
   },
   async remove(id, token) {
@@ -338,13 +429,16 @@ const blobStore: DocStore = {
     return doc?.account_id ?? null;
   },
   async tokenSet(token, accountId) {
-    await put(tokenPath(token), JSON.stringify({ account_id: accountId }), { ...ACCESS, addRandomSuffix: false, contentType: "application/json", cacheControlMaxAge: 0 });
+    await put(tokenPath(token), JSON.stringify({ account_id: accountId }), { ...ACCESS, addRandomSuffix: false, allowOverwrite: true, contentType: "application/json", cacheControlMaxAge: 0 });
+  },
+  async tokenDel(token) {
+    await del(tokenPath(token)).catch(() => undefined);
   },
 };
 
 function store(): DocStore {
   requireDb();
-  return process.env.DATABASE_URL ? pgStore : blobStore;
+  return storeName() === "postgres" ? pgStore : blobStore;
 }
 
 // Workspace documents
@@ -353,24 +447,37 @@ async function loadWorkspace(id: string): Promise<Workspace | null> {
   return store().load(id);
 }
 
-async function writeWorkspace(id: string, ws: Workspace): Promise<void> {
-  ws.version = (ws.version ?? 0) + 1;
-  await store().save(id, ws);
+async function writeWorkspace(id: string, ws: Workspace, expectedVersion: number): Promise<void> {
+  ws.version = expectedVersion + 1;
+  try {
+    await store().save(id, ws, expectedVersion);
+  } catch (err) {
+    ws.version = expectedVersion;
+    throw err;
+  }
 }
 
+// Read, apply, write-if-unchanged. On a conflict the function re-reads the
+// newest version and applies `fn` again, up to 5 times with jitter, so a cron
+// run, a user check, and a run record can never overwrite each other silently.
 async function mutate<T>(accountId: string, fn: (ws: Workspace) => T | Promise<T>): Promise<T> {
   let lastErr: unknown = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 5; attempt++) {
     try {
       const ws = await loadWorkspace(accountId);
       if (!ws) throw new Error(`Workspace ${accountId} not found`);
+      const seen = ws.version ?? 0;
       const result = await fn(ws);
-      await writeWorkspace(accountId, ws);
+      await writeWorkspace(accountId, ws, seen);
       return result;
     } catch (err) {
       lastErr = err;
       if (err instanceof Error && /not found/i.test(err.message)) throw err;
-      await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
+      if (err instanceof WriteConflict) {
+        conflictCounter += 1;
+        console.warn("[shop-rules] write conflict, retrying", err.message);
+      }
+      await new Promise((r) => setTimeout(r, 120 * (attempt + 1) + Math.random() * 200));
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error("Workspace write failed");
@@ -395,7 +502,17 @@ export async function getOrCreateAccount(id: string): Promise<AccountRow> {
     created_at: now(),
   };
   const fresh: Workspace = { version: 0, account, products: [], rules: [], alerts: [], runs: [], skills: [], prices: [] };
-  await writeWorkspace(id, fresh);
+  try {
+    await writeWorkspace(id, fresh, fresh.version ?? 0);
+  } catch (err) {
+    // Several first-visit requests race to create the same workspace; the
+    // compare-and-swap lets exactly one win and the others read its result.
+    if (err instanceof WriteConflict) {
+      const won = await loadWorkspace(id);
+      if (won) return won.account;
+    }
+    throw err;
+  }
   await store().tokenSet(account.token, id);
   return account;
 }
@@ -430,7 +547,17 @@ export async function deleteAccount(id: string): Promise<void> {
 function withOpenCounts(ws: Workspace, products: ProductRow[]): ProductRow[] {
   const counts = new Map<string, number>();
   for (const a of ws.alerts) if (a.status === "new") counts.set(a.product_id, (counts.get(a.product_id) ?? 0) + 1);
-  return products.map((p) => ({ ...p, open_alerts: counts.get(p.id) ?? 0 }));
+  const points = new Map<string, Array<{ at: string; price: number }>>();
+  for (const pr of ws.prices) {
+    const list = points.get(pr.product_id) ?? [];
+    list.push({ at: pr.at, price: Number(pr.price) });
+    points.set(pr.product_id, list);
+  }
+  return products.map((p) => ({
+    ...p,
+    open_alerts: counts.get(p.id) ?? 0,
+    price_points: (points.get(p.id) ?? []).sort((a, b) => a.at.localeCompare(b.at)).slice(-30),
+  }));
 }
 
 export async function listProducts(accountId: string): Promise<ProductRow[]> {
@@ -479,6 +606,47 @@ export async function insertProductBundle(
   });
 }
 
+// Merges seller overrides; null clears a field. Returns the updated product.
+export async function updateProductOverrides(accountId: string, id: string, patch: Partial<ProductOverrides>): Promise<ProductRow> {
+  return mutate(accountId, (ws) => {
+    const p = ws.products.find((x) => x.id === id);
+    if (!p) throw new Error(`Product ${id} not found`);
+    const next: ProductOverrides = { ...(p.overrides ?? {}) };
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined) continue;
+      if (v === null) delete (next as Record<string, unknown>)[k];
+      else (next as Record<string, unknown>)[k] = v;
+    }
+    p.overrides = Object.keys(next).length ? next : null;
+    return { ...p, open_alerts: ws.alerts.filter((a) => a.product_id === p.id && a.status === "new").length };
+  });
+}
+
+export async function setCompareCache(accountId: string, id: string, result: CompetitorListings): Promise<void> {
+  await mutate(accountId, (ws) => {
+    const p = ws.products.find((x) => x.id === id);
+    if (p) p.compare_cache = { at: now(), result };
+  });
+}
+
+export async function setProductDutyRate(accountId: string, id: string, rate: HtsRateResult | null): Promise<void> {
+  await mutate(accountId, (ws) => {
+    const p = ws.products.find((x) => x.id === id);
+    if (p) p.duty_rate = rate;
+  });
+}
+
+export async function saveNexusVerification(accountId: string, v: NexusVerification): Promise<void> {
+  await mutate(accountId, (ws) => {
+    ws.nexus_verifications = { ...(ws.nexus_verifications ?? {}), [v.state]: v };
+  });
+}
+
+export async function listNexusVerifications(accountId: string): Promise<Record<string, NexusVerification>> {
+  const ws = await requireWorkspace(accountId);
+  return ws.nexus_verifications ?? {};
+}
+
 export async function deleteProduct(accountId: string, id: string): Promise<void> {
   await mutate(accountId, (ws) => {
     ws.products = ws.products.filter((p) => p.id !== id);
@@ -520,12 +688,42 @@ export async function listRulesForAccount(accountId: string): Promise<RuleRow[]>
   return [...ws.rules];
 }
 
-export async function updateRule(id: string, patch: Partial<Pick<RuleRow, "last_run_at" | "last_hash" | "last_headline" | "cadence_hours">>, accountId?: string): Promise<void> {
+export async function updateRule(id: string, patch: Partial<Pick<RuleRow, "last_run_at" | "last_hash" | "last_headline" | "cadence_hours" | "paused">>, accountId?: string): Promise<RuleRow | null> {
   const owner = accountId ?? (await findOwnerByRule(id));
-  if (!owner) return;
-  await mutate(owner, (ws) => {
+  if (!owner) return null;
+  return mutate(owner, (ws) => {
     const r = ws.rules.find((x) => x.id === id);
     if (r) Object.assign(r, patch);
+    return r ?? null;
+  });
+}
+
+// Reseeds a product's rules from fresh specs, keyed by rule.key: rules whose key
+// still exists keep their id, schedule, hash, and last finding (only the spec
+// fields are refreshed), new keys are added, missing keys are removed along
+// with nothing else (alerts keep pointing at their rule id even if it is gone).
+export async function reseedRules(accountId: string, productId: string, specs: RuleSpec[]): Promise<{ rules: RuleRow[]; added: number; removed: number; kept: number }> {
+  return mutate(accountId, (ws) => {
+    const mine = ws.rules.filter((r) => r.product_id === productId);
+    const byKey = new Map(mine.map((r) => [r.key, r]));
+    const wanted = new Set(specs.map((s) => s.key));
+    let added = 0;
+    let kept = 0;
+    const next: RuleRow[] = [];
+    for (const s of specs) {
+      const existing = byKey.get(s.key);
+      if (existing) {
+        Object.assign(existing, { title: s.title, query: s.query, include_domains: s.include_domains, include_domains_mode: s.include_domains_mode, state: s.state, seed_note: s.seed_note, family: s.family });
+        next.push(existing);
+        kept += 1;
+      } else {
+        next.push({ ...s, id: uid(), account_id: accountId, product_id: productId, last_run_at: null, last_hash: null, last_headline: null, created_at: now() });
+        added += 1;
+      }
+    }
+    const removed = mine.filter((r) => !wanted.has(r.key)).length;
+    ws.rules = [...ws.rules.filter((r) => r.product_id !== productId), ...next];
+    return { rules: next, added, removed, kept };
   });
 }
 
@@ -603,6 +801,49 @@ export async function alertExistsForRuleHash(ruleId: string, hash: string, accou
   return ws.alerts.some((a) => a.rule_id === ruleId && a.impact?.hash === hash);
 }
 
+// Check runs: live progress for one check, written as its own small blob so the
+// product page (or the extension) can poll it while the check is still running.
+// Not part of the workspace document, so progress writes never contend with it.
+
+export type CheckScope = "all" | "due" | "tariff" | "safety" | "tax" | "policy";
+export type CheckItemStatus = "queued" | "checking" | "clear" | "unchanged" | "alert" | "error";
+
+export type IngestStepKey = "read" | "classify" | "seed";
+
+export interface CheckRunRecord {
+  id: string;
+  account_id: string;
+  /** Empty while an ingest has not created the product yet. */
+  product_id: string;
+  kind: "check" | "ingest";
+  scope: CheckScope;
+  /** Ingest only: Reading listing, Classifying, Seeding rules. */
+  steps?: Array<{ key: IngestStepKey; label: string; status: "queued" | "active" | "done" | "error"; detail?: string }>;
+  /** Set when the run failed, so the poller can show the reason even if the request itself was lost. */
+  error?: string | null;
+  status: "running" | "done" | "failed";
+  total: number;
+  done: number;
+  /** Domains being read right now, for the "Checked 5 of 11: cpsc.gov" line. */
+  current: string[];
+  items: Array<{ rule_id: string; title: string; family: RuleFamily; domain: string; status: CheckItemStatus; alert_id?: string; error?: string }>;
+  conflicts: number;
+  started_at: string;
+  finished_at: string | null;
+}
+
+const checkRunPath = (accountId: string, id: string) => `checkruns/${accountId}/${id}.json`;
+
+export async function saveCheckRun(run: CheckRunRecord): Promise<void> {
+  requireDb();
+  await put(checkRunPath(run.account_id, run.id), JSON.stringify(run), { ...ACCESS, addRandomSuffix: false, allowOverwrite: true, contentType: "application/json", cacheControlMaxAge: 0 });
+}
+
+export async function getCheckRun(accountId: string, id: string): Promise<CheckRunRecord | null> {
+  if (!/^[A-Za-z0-9_-]{8,64}$/.test(id)) return null;
+  return readBlob<CheckRunRecord>(checkRunPath(accountId, id));
+}
+
 // Runs (cost receipt)
 
 export async function insertRun(row: Omit<RunRow, "id" | "created_at">): Promise<void> {
@@ -637,6 +878,43 @@ export async function listSkills(accountId: string, productId?: string): Promise
 export async function deleteSkill(accountId: string, id: string): Promise<void> {
   await mutate(accountId, (ws) => {
     ws.skills = ws.skills.filter((s) => s.id !== id);
+  });
+}
+
+export async function updateSkill(accountId: string, id: string, patch: Partial<Pick<SkillRow, "text" | "scope">>): Promise<SkillRow | null> {
+  return mutate(accountId, (ws) => {
+    const s = ws.skills.find((x) => x.id === id);
+    if (s) Object.assign(s, patch);
+    return s ?? null;
+  });
+}
+
+// Token rotation: a new token file is written first, the account switches to
+// it, then the old file is removed so the old token stops working.
+export async function rotateToken(accountId: string): Promise<AccountRow> {
+  const fresh = newToken();
+  await store().tokenSet(fresh, accountId);
+  let old: string | null = null;
+  const account = await mutate(accountId, (ws) => {
+    old = ws.account.token;
+    ws.account.token = fresh;
+    return ws.account;
+  });
+  if (old && old !== fresh) await store().tokenDel(old);
+  return account;
+}
+
+// Daily quota on paid endpoints (limits.ts). Returns the decision; when allowed
+// the counter is already incremented.
+export async function consumeQuota(accountId: string, kind: LimitKind, cost = 1): Promise<QuotaDecision> {
+  const limit = limitFor(kind);
+  const key = usageKey(kind);
+  return mutate(accountId, (ws) => {
+    ws.account.usage = pruneUsage(ws.account.usage ?? {});
+    const used = ws.account.usage[key] ?? 0;
+    const decision = decideQuota(kind, used, limit, cost);
+    if (decision.allowed) ws.account.usage[key] = used + cost;
+    return decision;
   });
 }
 
@@ -675,8 +953,8 @@ export async function deleteForge(accountId: string, id: string): Promise<void> 
 
 // Price history
 
-export async function insertPrice(row: { account_id: string; product_id: string; price: number; currency: string | null; source: string }): Promise<void> {
-  const price: PriceRow = { id: uid(), product_id: row.product_id, price: row.price, currency: row.currency, source: row.source, at: now() };
+export async function insertPrice(row: { account_id: string; product_id: string; price: number; currency: string | null; source: string; at?: string }): Promise<void> {
+  const price: PriceRow = { id: uid(), product_id: row.product_id, price: row.price, currency: row.currency, source: row.source, at: row.at ?? now() };
   await mutate(row.account_id, (ws) => {
     ws.prices.push(price);
   });

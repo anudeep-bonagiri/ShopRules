@@ -1,0 +1,308 @@
+{
+  "note": "Golden cases for the rule checker. Sources are realistic excerpts in the style of the official sites (not live pages) so the expected answers are known. `simulated` is a model output used only with --offline to exercise the verifier and guardrails without a model call.",
+  "products": {
+    "lamp": {
+      "title": "USB-C Rechargeable LED Desk Lamp with Lithium Battery, 3 Color Modes, Foldable",
+      "price": 29.99,
+      "currency": "USD",
+      "marketplace": "amazon",
+      "profile": {
+        "title": "USB-C Rechargeable LED Desk Lamp",
+        "brand": null,
+        "price": 29.99,
+        "currency": "USD",
+        "category": "Lighting",
+        "product_type": "desk lamp",
+        "materials": ["aluminum alloy", "abs plastic", "lithium-ion battery"],
+        "origin_country": "CN",
+        "intended_for_children": false,
+        "is_cosmetic": false,
+        "is_electronic": true,
+        "has_battery": true,
+        "is_textile": false,
+        "is_food_contact": false,
+        "is_supplement_or_food": false,
+        "hts_candidates": [{ "code": "9405", "description": "Lamps and lighting fittings", "confidence": 0.8 }],
+        "keywords": ["desk lamp", "led lamp", "rechargeable lamp", "lithium battery"],
+        "summary": "A portable LED desk lamp with a built-in lithium-ion battery, made in China."
+      }
+    },
+    "toy": {
+      "title": "Wooden Rainbow Stacker Toy, Montessori Stacking Blocks for Toddlers 1-3",
+      "price": 34,
+      "currency": "USD",
+      "marketplace": "etsy",
+      "profile": {
+        "title": "Wooden Rainbow Stacker Toy",
+        "brand": null,
+        "price": 34,
+        "currency": "USD",
+        "category": "Toys",
+        "product_type": "stacking toy",
+        "materials": ["beech wood", "water-based paint"],
+        "origin_country": "CN",
+        "intended_for_children": true,
+        "is_cosmetic": false,
+        "is_electronic": false,
+        "has_battery": false,
+        "is_textile": false,
+        "is_food_contact": false,
+        "is_supplement_or_food": false,
+        "hts_candidates": [{ "code": "9503", "description": "Toys, scale models, puzzles", "confidence": 0.9 }],
+        "keywords": ["wooden toy", "stacking toy", "toddler toy", "montessori"],
+        "summary": "A painted beech wood stacking toy for children 12 months and up."
+      }
+    },
+    "tee": {
+      "title": "Organic Cotton Oversized Tee, Garment Dyed, Unisex",
+      "price": 42,
+      "currency": "USD",
+      "marketplace": "shopify",
+      "profile": {
+        "title": "Organic Cotton Oversized Tee",
+        "brand": null,
+        "price": 42,
+        "currency": "USD",
+        "category": "Apparel",
+        "product_type": "t-shirt",
+        "materials": ["organic cotton"],
+        "origin_country": "VN",
+        "intended_for_children": false,
+        "is_cosmetic": false,
+        "is_electronic": false,
+        "has_battery": false,
+        "is_textile": true,
+        "is_food_contact": false,
+        "is_supplement_or_food": false,
+        "hts_candidates": [{ "code": "6109", "description": "T-shirts, tanks, knit tops", "confidence": 0.9 }],
+        "keywords": ["t-shirt", "cotton tee", "knit top", "apparel"],
+        "summary": "A heavyweight organic cotton t-shirt cut and sewn in Vietnam."
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "lamp_301_increase",
+      "what": "A clear duty increase on the product's heading and origin must be reported with the exact point change.",
+      "product": "lamp",
+      "rule": { "family": "tariff", "title": "Section 301 duty on lamps from China", "query": "Section 301 China tariff lamps 9405 2026", "state": null, "seed_note": null, "include_domains": ["ustr.gov", "federalregister.gov", "cbp.gov"], "include_domains_mode": "strict" },
+      "sources": [
+        {
+          "url": "https://ustr.gov/about-us/policy-offices/press-office/press-releases/2025/section-301-modification-lamps",
+          "title": "USTR Modifies Section 301 Action: Lighting Products",
+          "published_date": "2025-11-15",
+          "text": "Notice of Modification of Action. The U.S. Trade Representative has determined to modify the action in the Section 301 investigation of China's acts, policies, and practices related to technology transfer. For products of China classified under heading 9405 of the Harmonized Tariff Schedule of the United States (lamps and lighting fittings), the additional duty will increase from 25 percent to 37.5 percent ad valorem effective January 1, 2026. Importers should file entries under the appropriate Chapter 99 subheading. Requests for exclusions may be submitted through the exclusion portal through March 31, 2026."
+        }
+      ],
+      "expected": { "relevance": ["affects"], "tariff_rate_change_pct": 12.5, "effective_date": "2026-01-01", "action_type": ["reprice"] },
+      "simulated": {
+        "relevance": "affects",
+        "headline": "Section 301 duty on lamps from China rises from 25% to 37.5% on January 1, 2026",
+        "claims": [{ "claim": "The additional duty on heading 9405 rises 12.5 points", "quote": "the additional duty will increase from 25 percent to 37.5 percent ad valorem effective January 1, 2026", "source_url": "https://ustr.gov/about-us/policy-offices/press-office/press-releases/2025/section-301-modification-lamps" }],
+        "impact": { "severity": "high", "effective_date": "2026-01-01", "tariff_rate_change_pct": 12.5, "estimated_cost_change_pct": null },
+        "action": { "type": "reprice", "title": "Reprice before January 1", "steps": ["Confirm the lamp enters under heading 9405", "Update the landed cost in Shop Rules", "Raise the listing price"], "rationale": "Duty up 12.5 points." }
+      }
+    },
+    {
+      "id": "lamp_footwear_notice",
+      "what": "A notice about a different heading and origin on the same official site must be no_change.",
+      "product": "lamp",
+      "rule": { "family": "tariff", "title": "Section 301 duty on lamps from China", "query": "Section 301 China tariff lamps 9405 2026", "state": null, "seed_note": null, "include_domains": ["ustr.gov", "federalregister.gov", "cbp.gov"], "include_domains_mode": "strict" },
+      "sources": [
+        {
+          "url": "https://www.federalregister.gov/documents/2025/10/02/footwear-vietnam-duty",
+          "title": "Modification of Duty Rates on Certain Footwear",
+          "published_date": "2025-10-02",
+          "text": "This notice modifies the rates of duty on footwear with outer soles of rubber or plastics and uppers of textile materials classified under heading 6404 that are the product of Vietnam. Effective November 1, 2025, such footwear is subject to an additional duty of 20 percent ad valorem. Footwear of heading 6403 with leather uppers is not affected by this notice. No other headings are modified."
+        }
+      ],
+      "expected": { "relevance": ["no_change"], "tariff_rate_change_pct": null, "action_type": ["none", "review"] },
+      "simulated": {
+        "relevance": "affects",
+        "headline": "New 20% duty on products from Vietnam takes effect November 1",
+        "claims": [{ "claim": "A 20 percent duty applies from November 1, 2025", "quote": "Effective November 1, 2025, such footwear is subject to an additional duty of 20 percent ad valorem", "source_url": "https://www.federalregister.gov/documents/2025/10/02/footwear-vietnam-duty" }],
+        "impact": { "severity": "high", "effective_date": "2025-11-01", "tariff_rate_change_pct": 20, "estimated_cost_change_pct": null },
+        "action": { "type": "reprice", "title": "Reprice", "steps": ["Raise price"], "rationale": "Duty up." }
+      }
+    },
+    {
+      "id": "toy_astm_f963",
+      "what": "A mandatory toy safety standard with a date is a compliance step, never a reprice, with no duty number.",
+      "product": "toy",
+      "rule": { "family": "safety", "title": "ASTM F963 toy safety standard (CPSC)", "query": "CPSC ASTM F963 toy safety standard requirements 2026", "state": null, "seed_note": null, "include_domains": ["cpsc.gov", "federalregister.gov"], "include_domains_mode": "strict" },
+      "sources": [
+        {
+          "url": "https://www.cpsc.gov/Business--Manufacturing/Business-Education/Toy-Safety/ASTM-F963",
+          "title": "Toy Safety Standard: ASTM F963",
+          "published_date": "2025-06-10",
+          "text": "The Consumer Product Safety Improvement Act makes ASTM F963 the mandatory toy safety standard for toys intended for children under 14. Toys manufactured on or after April 20, 2026 must comply with ASTM F963-23, including the revised requirements for small parts and the heavy metals limits for paint and surface coatings. Lead in paint and surface coatings is limited to 90 parts per million. Children's toys must be tested by a CPSC-accepted laboratory and the manufacturer or importer must issue a Children's Product Certificate before the toy is imported or distributed."
+        }
+      ],
+      "expected": { "relevance": ["affects"], "tariff_rate_change_pct": null, "effective_date": "2026-04-20", "action_type": ["compliance_step"] },
+      "simulated": {
+        "relevance": "affects",
+        "headline": "Toys made on or after April 20, 2026 must meet ASTM F963-23 with third-party testing",
+        "claims": [
+          { "claim": "ASTM F963-23 applies to toys made on or after April 20, 2026", "quote": "Toys manufactured on or after April 20, 2026 must comply with ASTM F963-23", "source_url": "https://www.cpsc.gov/Business--Manufacturing/Business-Education/Toy-Safety/ASTM-F963" },
+          { "claim": "A Children's Product Certificate is required", "quote": "the manufacturer or importer must issue a Children's Product Certificate before the toy is imported or distributed", "source_url": "https://www.cpsc.gov/Business--Manufacturing/Business-Education/Toy-Safety/ASTM-F963" }
+        ],
+        "impact": { "severity": "high", "effective_date": "2026-04-20", "tariff_rate_change_pct": null, "estimated_cost_change_pct": null },
+        "action": { "type": "compliance_step", "title": "Get F963-23 test reports and a Children's Product Certificate", "steps": ["Ask the maker for F963-23 test reports from a CPSC-accepted lab", "Issue a Children's Product Certificate", "Keep the paint lead report under 90 ppm on file"], "rationale": "Mandatory standard." }
+      }
+    },
+    {
+      "id": "toy_crib_rule",
+      "what": "A CPSC rule about cribs is not about a stacking toy; must be no_change even though the site is right.",
+      "product": "toy",
+      "rule": { "family": "safety", "title": "ASTM F963 toy safety standard (CPSC)", "query": "CPSC ASTM F963 toy safety standard requirements 2026", "state": null, "seed_note": null, "include_domains": ["cpsc.gov", "federalregister.gov"], "include_domains_mode": "strict" },
+      "sources": [
+        {
+          "url": "https://www.cpsc.gov/Regulations-Laws--Standards/Rulemaking/Final-and-Proposed-Rules/Full-Size-Cribs",
+          "title": "Safety Standard for Full-Size Baby Cribs",
+          "published_date": "2025-09-01",
+          "text": "The Commission is updating the mandatory safety standard for full-size baby cribs to incorporate ASTM F1169-25. Full-size cribs manufactured after March 1, 2026 must meet the updated mattress support and slat strength requirements and carry a permanent tracking label. This rule applies to full-size cribs only and does not change requirements for toys, play yards, or bassinets."
+        }
+      ],
+      "expected": { "relevance": ["no_change"], "tariff_rate_change_pct": null, "action_type": ["none", "review"] },
+      "simulated": {
+        "relevance": "might_affect",
+        "headline": "Updated crib standard takes effect March 1, 2026",
+        "claims": [{ "claim": "Cribs must meet ASTM F1169-25 after March 1, 2026", "quote": "Full-size cribs manufactured after March 1, 2026 must meet the updated mattress support and slat strength requirements", "source_url": "https://www.cpsc.gov/Regulations-Laws--Standards/Rulemaking/Final-and-Proposed-Rules/Full-Size-Cribs" }],
+        "impact": { "severity": "medium", "effective_date": "2026-03-01", "tariff_rate_change_pct": null, "estimated_cost_change_pct": null },
+        "action": { "type": "review", "title": "Review", "steps": ["Check whether the rule applies"], "rationale": "Unclear." }
+      }
+    },
+    {
+      "id": "tee_vietnam_reciprocal",
+      "what": "A country-wide duty on the product's origin applies to the tee; the point change is the stated rate.",
+      "product": "tee",
+      "rule": { "family": "tariff", "title": "Duties on apparel from Vietnam", "query": "tariff apparel Vietnam 6109 duty rate 2026", "state": null, "seed_note": null, "include_domains": ["cbp.gov", "whitehouse.gov", "federalregister.gov", "ustr.gov"], "include_domains_mode": "strict" },
+      "sources": [
+        {
+          "url": "https://www.cbp.gov/trade/programs-administration/trade-remedies/reciprocal-tariffs-vietnam",
+          "title": "CSMS: Implementation of Additional Duties on Products of Vietnam",
+          "published_date": "2025-12-05",
+          "text": "Effective with respect to goods entered for consumption on or after February 1, 2026, all articles that are products of Vietnam, including textile and apparel articles of chapters 61 and 62, are subject to an additional ad valorem duty of 20 percent in addition to any other duties, fees, and charges applicable to such imported articles. Articles of Vietnam that qualify for the de minimis exemption are not eligible for the exemption and must be entered with duties paid."
+        }
+      ],
+      "expected": { "relevance": ["affects"], "tariff_rate_change_pct": 20, "effective_date": "2026-02-01", "action_type": ["reprice"] },
+      "simulated": {
+        "relevance": "affects",
+        "headline": "Products of Vietnam including apparel get an extra 20% duty from February 1, 2026",
+        "claims": [{ "claim": "An additional 20 percent duty applies to products of Vietnam including apparel", "quote": "all articles that are products of Vietnam, including textile and apparel articles of chapters 61 and 62, are subject to an additional ad valorem duty of 20 percent", "source_url": "https://www.cbp.gov/trade/programs-administration/trade-remedies/reciprocal-tariffs-vietnam" }],
+        "impact": { "severity": "high", "effective_date": "2026-02-01", "tariff_rate_change_pct": 20, "estimated_cost_change_pct": null },
+        "action": { "type": "reprice", "title": "Reprice before February 1", "steps": ["Confirm the tee is a product of Vietnam", "Raise the price"], "rationale": "Duty up 20 points." }
+      }
+    },
+    {
+      "id": "tee_china_only_notice",
+      "what": "A China-only apparel duty does not touch a Vietnam-made tee: not affects.",
+      "product": "tee",
+      "rule": { "family": "tariff", "title": "Duties on apparel from Vietnam", "query": "tariff apparel Vietnam 6109 duty rate 2026", "state": null, "seed_note": null, "include_domains": ["cbp.gov", "whitehouse.gov", "federalregister.gov", "ustr.gov"], "include_domains_mode": "strict" },
+      "sources": [
+        {
+          "url": "https://ustr.gov/issue-areas/enforcement/section-301-investigations/china-apparel-2026",
+          "title": "Section 301: Additional Duties on Apparel Products of China",
+          "published_date": "2026-01-20",
+          "text": "The Trade Representative has determined to impose an additional 25 percent ad valorem duty on apparel articles classified in chapters 61 and 62 that are products of China, effective March 15, 2026. This action applies only to products of China. Products of other countries, including Vietnam, Bangladesh, and India, are not covered by this action."
+        }
+      ],
+      "expected": { "relevance": ["no_change", "might_affect"], "tariff_rate_change_pct": null, "action_type": ["none", "review"] },
+      "simulated": {
+        "relevance": "no_change",
+        "headline": "No change for Vietnam-made apparel; the new duty covers China only",
+        "claims": [],
+        "impact": { "severity": "low", "effective_date": null, "tariff_rate_change_pct": null, "estimated_cost_change_pct": null },
+        "action": { "type": "none", "title": "Nothing to do", "steps": [], "rationale": "China only." }
+      }
+    },
+    {
+      "id": "texas_threshold_change",
+      "what": "A changed nexus threshold is a tax rule change: register_tax or review, with no duty number and the stated date.",
+      "product": "tee",
+      "rule": { "family": "tax", "title": "Texas economic nexus threshold", "query": "Texas remote seller economic nexus threshold comptroller 2026", "state": "TX", "seed_note": "$500,000 in Texas revenue over the prior 12 months", "include_domains": ["comptroller.texas.gov"], "include_domains_mode": "strict" },
+      "sources": [
+        {
+          "url": "https://comptroller.texas.gov/taxes/sales/remote-sellers.php",
+          "title": "Remote Sellers | Texas Comptroller",
+          "published_date": "2026-01-05",
+          "text": "Remote sellers with total Texas revenue of $500,000 or more in the preceding twelve calendar months must obtain a Texas sales and use tax permit and collect tax. Beginning October 1, 2026, the safe harbor threshold is reduced to $250,000 in total Texas revenue in the preceding twelve calendar months. Marketplace providers such as Amazon and Etsy collect and remit Texas tax on sales made through the marketplace; sales through a seller's own website count toward the seller's own threshold."
+        }
+      ],
+      "expected": { "relevance": ["affects", "might_affect"], "tariff_rate_change_pct": null, "effective_date": "2026-10-01", "action_type": ["register_tax", "review"] },
+      "simulated": {
+        "relevance": "affects",
+        "headline": "Texas lowers its remote seller threshold to $250,000 on October 1, 2026",
+        "claims": [{ "claim": "The Texas threshold drops to $250,000 on October 1, 2026", "quote": "Beginning October 1, 2026, the safe harbor threshold is reduced to $250,000 in total Texas revenue in the preceding twelve calendar months", "source_url": "https://comptroller.texas.gov/taxes/sales/remote-sellers.php" }],
+        "impact": { "severity": "medium", "effective_date": "2026-10-01", "tariff_rate_change_pct": null, "estimated_cost_change_pct": null },
+        "action": { "type": "register_tax", "title": "Check Texas sales against $250,000", "steps": ["Total the last 12 months of Texas sales from your own site", "Register for a Texas permit if you are over $250,000"], "rationale": "Threshold change." }
+      }
+    },
+    {
+      "id": "lamp_old_notice_2019",
+      "what": "A 2019 action is background: no new change should be raised, and a 2019 date must not be reported as new.",
+      "product": "lamp",
+      "rule": { "family": "tariff", "title": "Section 301 duty on lamps from China", "query": "Section 301 China tariff lamps 9405 2026", "state": null, "seed_note": null, "include_domains": ["ustr.gov", "federalregister.gov", "cbp.gov"], "include_domains_mode": "strict" },
+      "sources": [
+        {
+          "url": "https://ustr.gov/issue-areas/enforcement/section-301-investigations/tariff-actions/list-3",
+          "title": "Section 301 List 3 Tariff Action (2019)",
+          "published_date": "2019-05-10",
+          "text": "Effective May 10, 2019, the rate of additional duty on products covered by the September 2018 action (List 3), which includes lamps and lighting fittings of heading 9405, increased from 10 percent to 25 percent ad valorem. This page is maintained for reference."
+        }
+      ],
+      "expected": { "relevance": ["no_change", "might_affect"], "effective_date": null, "action_type": ["none", "review"] },
+      "simulated": {
+        "relevance": "no_change",
+        "headline": "No new change; the 2019 List 3 increase to 25% is the standing rate",
+        "claims": [],
+        "impact": { "severity": "low", "effective_date": null, "tariff_rate_change_pct": null, "estimated_cost_change_pct": null },
+        "action": { "type": "none", "title": "Nothing to do", "steps": [], "rationale": "Background." }
+      }
+    },
+    {
+      "id": "lamp_two_rates_difference",
+      "what": "When a source states old and new rates, the point change is their difference (7.5 to 25 is 17.5).",
+      "product": "lamp",
+      "rule": { "family": "tariff", "title": "Section 301 duty on lamps from China", "query": "Section 301 China tariff lamps 9405 2026", "state": null, "seed_note": null, "include_domains": ["ustr.gov", "federalregister.gov", "cbp.gov"], "include_domains_mode": "strict" },
+      "sources": [
+        {
+          "url": "https://www.federalregister.gov/documents/2026/02/14/lighting-list-4a-modification",
+          "title": "Modification of Section 301 List 4A Rates: Lighting Products of China",
+          "published_date": "2026-02-14",
+          "text": "For lamps and lighting fittings of heading 9405 that are products of China and covered by List 4A, the additional duty rate is modified from 7.5 percent to 25 percent ad valorem for goods entered on or after June 1, 2026. Portable electric lamps of heading 8513 remain at 7.5 percent."
+        }
+      ],
+      "expected": { "relevance": ["affects"], "tariff_rate_change_pct": 17.5, "effective_date": "2026-06-01", "action_type": ["reprice"] },
+      "simulated": {
+        "relevance": "affects",
+        "headline": "List 4A duty on lamps of heading 9405 from China rises from 7.5% to 25% on June 1, 2026",
+        "claims": [{ "claim": "The duty on heading 9405 rises from 7.5 to 25 percent", "quote": "the additional duty rate is modified from 7.5 percent to 25 percent ad valorem for goods entered on or after June 1, 2026", "source_url": "https://www.federalregister.gov/documents/2026/02/14/lighting-list-4a-modification" }],
+        "impact": { "severity": "high", "effective_date": "2026-06-01", "tariff_rate_change_pct": 25, "estimated_cost_change_pct": null },
+        "action": { "type": "reprice", "title": "Reprice before June 1", "steps": ["Confirm heading 9405", "Raise the price"], "rationale": "Duty up." }
+      }
+    },
+    {
+      "id": "etsy_policy_unchanged",
+      "what": "General marketplace policy text with no new requirement is no_change.",
+      "product": "toy",
+      "rule": { "family": "policy", "title": "Etsy prohibited items and handmade policy", "query": "Etsy seller policy prohibited items handmade toys 2026", "state": null, "seed_note": null, "include_domains": ["etsy.com"], "include_domains_mode": "strict" },
+      "sources": [
+        {
+          "url": "https://www.etsy.com/legal/prohibited/",
+          "title": "Prohibited Items Policy - Etsy",
+          "published_date": "2025-03-01",
+          "text": "Etsy is a marketplace for handmade, vintage, and craft supplies. Sellers are responsible for complying with the laws that apply to their items, including product safety laws. Items that are illegal, hazardous, or that infringe intellectual property are prohibited. Toys and children's products must comply with applicable safety regulations in the markets where they are sold. This policy was last updated March 1, 2025."
+        }
+      ],
+      "expected": { "relevance": ["no_change", "might_affect"], "tariff_rate_change_pct": null, "action_type": ["none", "review"] },
+      "simulated": {
+        "relevance": "no_change",
+        "headline": "No policy change; Etsy restates that toys must meet applicable safety rules",
+        "claims": [],
+        "impact": { "severity": "low", "effective_date": null, "tariff_rate_change_pct": null, "estimated_cost_change_pct": null },
+        "action": { "type": "none", "title": "Nothing to do", "steps": [], "rationale": "No change." }
+      }
+    }
+  ]
+}

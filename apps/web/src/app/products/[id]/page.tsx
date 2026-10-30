@@ -1,17 +1,21 @@
 "use client";
 
-import { Banner } from "@shopify/polaris";
+import { Banner, Select } from "@shopify/polaris";
 import NextLink from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { api, timeAgo, useApi } from "@/lib/client";
-import type { AccountRow, AlertRow, ForgeRow, PriceRow, ProductRow, RuleRow, SkillRow } from "@/lib/db";
+import type { AccountRow, AlertRow, CheckRunRecord, CheckScope, ForgeRow, PriceRow, ProductRow, RuleRow, SkillRow } from "@/lib/db";
 import { computeEconomics, fmtMoney, fmtPct } from "@/lib/economics";
 import { countryName, FAMILY_LABEL } from "@/lib/rules-catalog";
-import { Sparkline } from "@/components/ui";
+import { PriceChart } from "@/components/PriceChart";
 import { ForgeListRow, ForgeStepper, useForgeStageTimer } from "@/components/forge";
+import { SellerFields } from "@/components/SellerFields";
+import { StandingInstructions } from "@/components/StandingInstructions";
+import { effectivePrice, effectiveProfile, fieldSource, pricingProduct } from "@/lib/product";
 import {
   AccentCard,
+  alertEconomics,
   alertTone,
   AuditRow,
   BackLink,
@@ -33,7 +37,24 @@ import {
 } from "@/components/stitch";
 
 type Detail = { product: ProductRow; rules: RuleRow[]; alerts: AlertRow[]; price_history: PriceRow[]; skills: SkillRow[] };
-type CheckResult = { alerts: AlertRow[]; checked: number; skipped_unchanged: number; errors: string[]; meter: { tavily_calls: number; llm: Array<{ tier: string; cost_usd: number }> } };
+type CheckResult = { alerts: AlertRow[]; checked: number; skipped_unchanged: number; errors: string[]; run_id: string; meter: { tavily_calls: number; llm: Array<{ tier: string; cost_usd: number }> } };
+
+const SCOPE_OPTIONS: Array<{ label: string; value: CheckScope }> = [
+  { label: "Due rules", value: "due" },
+  { label: "Every rule", value: "all" },
+  { label: "Tariffs only", value: "tariff" },
+  { label: "Product safety only", value: "safety" },
+  { label: "Sales tax only", value: "tax" },
+  { label: "Marketplace policy only", value: "policy" },
+];
+
+function newRunId(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+}
 
 export default function ProductInspectorPage() {
   const params = useParams<{ id: string }>();
@@ -44,6 +65,8 @@ export default function ProductInspectorPage() {
   const settings = account.data?.account.settings;
 
   const [checking, setChecking] = useState(false);
+  const [scope, setScope] = useState<CheckScope>("due");
+  const [progress, setProgress] = useState<CheckRunRecord | null>(null);
   const [result, setResult] = useState<CheckResult | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [drafting, setDrafting] = useState(false);
@@ -63,25 +86,36 @@ export default function ProductInspectorPage() {
   const openAlerts = useMemo(() => (data ? sortAlerts(data.alerts.filter((a) => a.status === "new"), productMap, settings) : []), [data, productMap, settings]);
   const top = openAlerts[0] ?? null;
 
-  async function runCheck() {
+  // The check request blocks until every rule ran; a run id chosen here lets the
+  // page poll live progress from GET /api/runs/[id] while it waits.
+  async function runCheck(which: CheckScope = scope) {
     if (!id) return;
+    const runId = newRunId();
     setChecking(true);
     setActionError(null);
     setResult(null);
+    setProgress(null);
+    const poll = window.setInterval(() => {
+      api<{ run: CheckRunRecord }>(`/api/runs/${runId}`)
+        .then((r) => setProgress(r.run))
+        .catch(() => undefined); // 404 until the first progress write lands
+    }, 2000);
     try {
-      const r = await api<CheckResult>(`/api/products/${id}/check`, { method: "POST", json: { force: false, max_rules: 4 } });
+      const r = await api<CheckResult>(`/api/products/${id}/check`, { method: "POST", json: { scope: which, force: false, run_id: runId } });
       setResult(r);
       refresh();
     } catch (e) {
       setActionError((e as Error).message);
     } finally {
+      window.clearInterval(poll);
       setChecking(false);
+      setProgress(null);
     }
   }
 
   async function draftReprice() {
-    if (!top || top.action?.suggested_price == null) return;
-    const price = top.action.suggested_price;
+    const price = top ? (alertEconomics(top, product, settings)?.suggested_price ?? null) : null;
+    if (!top || price == null) return;
     setDrafting(true);
     setActionError(null);
     try {
@@ -174,15 +208,17 @@ export default function ProductInspectorPage() {
   }
 
   const { rules, alerts, price_history, skills } = data;
-  const profile = product.profile;
+  const profile = effectiveProfile(product);
+  const shownPrice = effectivePrice(product);
+  const pp = pricingProduct(product);
   const defaultForgeRule = rules.find((r) => r.family === "tariff") ?? rules[0] ?? null;
   const forgeList = forges.data?.forges ?? [];
   const forgePassing = forgeList.filter((f) => f.status === "passed").length;
   const currency = product.currency || settings?.currency || "USD";
   const unitCostPct = settings?.unit_cost_pct ?? 45;
   const units = settings?.units_per_week ?? 20;
-  const base = computeEconomics({ price: product.price, unit_cost_pct: unitCostPct });
-  const econ = top ? computeEconomics({ price: product.price, unit_cost_pct: unitCostPct, duty_delta_pct: top.impact?.tariff_rate_change_pct ?? null, units_per_week: units, suggested_price: top.action?.suggested_price ?? null }) : null;
+  const base = computeEconomics({ price: shownPrice, unit_cost: pp.unit_cost, unit_cost_pct: unitCostPct, dutiable_share: pp.dutiable_share, units_per_week: pp.units_per_week ?? units, target_margin_pct: settings?.target_margin_pct });
+  const econ = top ? alertEconomics(top, product, settings) : null;
   const hasDuty = Boolean(econ && econ.new_margin_pct != null);
   const hts = profile?.hts_candidates?.[0];
   const topTone = top ? alertTone(top) : "success";
@@ -203,7 +239,7 @@ export default function ProductInspectorPage() {
     profile?.is_food_contact ? "Food contact" : null,
     profile?.is_supplement_or_food ? "Food or supplement" : null,
   ].filter(Boolean) as string[];
-  const suggestedRaw = top?.action?.suggested_price ?? null;
+  const suggestedRaw = econ?.suggested_price ?? null;
   const suggested = suggestedRaw != null && product.price != null && Math.abs(suggestedRaw - product.price) < 0.005 ? null : suggestedRaw;
   const llmCost = result ? result.meter.llm.reduce((s, c) => s + c.cost_usd, 0) : 0;
 
@@ -217,8 +253,17 @@ export default function ProductInspectorPage() {
         </Banner>
       ) : null}
       {checking ? (
-        <Banner tone="info" title="Checking official sources">
-          <p>Searching each due rule on its official domains, reading the pages, and deciding whether the change touches this product. This takes 20 to 60 seconds.</p>
+        <Banner tone="info" title={progress && progress.total > 0 ? `Checked ${progress.done} of ${progress.total}${progress.current.length ? `: ${Array.from(new Set(progress.current)).join(", ")}` : ""}` : "Checking official sources"}>
+          <p aria-live="polite">
+            {progress && progress.total === 0
+              ? "Nothing is due. Choose Every rule to recheck everything."
+              : progress
+                ? progress.items
+                    .filter((i) => i.status !== "queued")
+                    .map((i) => `${i.title}: ${i.status === "checking" ? "reading" : i.status}`)
+                    .join(". ")
+                : "Searching each rule on its official domains, reading the pages, and deciding whether the change touches this product. Rules run three at a time, about 20 seconds each."}
+          </p>
         </Banner>
       ) : null}
       {result ? (
@@ -270,6 +315,15 @@ export default function ProductInspectorPage() {
                 {hts?.code ? (
                   <p className="sr-xs sr-num">
                     HS {hts.code}, {hts.description} ({Math.round(hts.confidence * 100)}% confidence)
+                    {profile?.hts_detail ? `, suggested ${profile.hts_detail}, verify with a broker` : ""}
+                    {profile?.hts_guarded ? ". Heading set from the catalog, the classifier disagreed" : ""}
+                  </p>
+                ) : null}
+                {product.duty_rate ? (
+                  <p className="sr-xs sr-num">
+                    {product.duty_rate.verified && product.duty_rate.general
+                      ? `General duty ${product.duty_rate.general}${product.duty_rate.special ? `, special ${product.duty_rate.special}` : ""}, ${product.duty_rate.label}`
+                      : `Official duty rate not read yet (${product.duty_rate.reason ?? "schedule page not parsed"}), ${product.duty_rate.label}`}
                   </p>
                 ) : null}
               </div>
@@ -278,13 +332,13 @@ export default function ProductInspectorPage() {
               <div>
                 <p className="sr-xs">Retail price</p>
                 <p className="sr-pricegrid__value" style={{ marginTop: 2 }}>
-                  {fmtMoney(product.price, currency)}{" "}
+                  {fmtMoney(shownPrice, currency)}{" "}
                   <span className="sr-sm" style={{ fontWeight: 400 }}>
                     {currency}
                   </span>
                 </p>
                 <p className="sr-xs" style={{ marginTop: 2 }}>
-                  From the listing
+                  {fieldSource(product, "price_override") === "product" ? `Set by you, listing shows ${fmtMoney(product.price, currency)}` : "From the listing"}
                 </p>
               </div>
               <div>
@@ -301,11 +355,22 @@ export default function ProductInspectorPage() {
               </div>
             </div>
             <p className="sr-xs">
-              Estimate: landed cost at {unitCostPct}% of price, {units} units a week.{" "}
+              {pp.unit_cost != null ? `Landed cost set for this product at ${fmtMoney(pp.unit_cost, currency)}` : `Estimate: landed cost at ${unitCostPct}% of price (workspace default)`}, {pp.units_per_week ?? units} units a week{pp.units_per_week != null ? " (set for this product)" : ""}.{" "}
               <NextLink href="/settings" className="sr-link">
-                Edit in Settings
+                Workspace defaults
               </NextLink>
             </p>
+          </SrCard>
+
+          <SrCard style={{ order: 1 }}>
+            <SellerFields
+              product={product}
+              settings={settings}
+              onSaved={(_p, note) => {
+                setNotice(note);
+                refresh();
+              }}
+            />
           </SrCard>
 
           {top ? (
@@ -369,7 +434,7 @@ export default function ProductInspectorPage() {
                 </StatusPill>
               </div>
               <div>
-                <SrButton variant="primary" onClick={runCheck} loading={checking}>
+                <SrButton variant="primary" onClick={() => void runCheck()} loading={checking}>
                   Run a check now
                 </SrButton>
               </div>
@@ -527,44 +592,53 @@ export default function ProductInspectorPage() {
                 price={suggested}
                 currency={currency}
                 preservedPct={econ?.preserved_margin_pct ?? null}
+                explanation={econ?.pricing?.explanation ?? null}
                 retailDelta={econ?.retail_delta ?? (product.price != null ? suggested - product.price : null)}
                 onDraft={draftReprice}
                 busy={drafting}
               />
             ) : null}
             <div className="sr-grid-2 sr-grid-2--always sr-grid-2--tight">
-              <SrButton size="lg" onClick={runCheck} loading={checking}>
+              <SrButton size="lg" onClick={() => void runCheck()} loading={checking}>
                 Run check now
               </SrButton>
               <SrButton size="lg" onClick={exportDossier}>
                 Export dossier
               </SrButton>
             </div>
+            <div className="sr-row sr-row--between" style={{ gap: 8 }}>
+              <span className="sr-xs">Check</span>
+              <div className="sr-grow">
+                <Select label="Check scope" labelHidden options={SCOPE_OPTIONS} value={scope} onChange={(v) => setScope(v as CheckScope)} disabled={checking} />
+              </div>
+            </div>
             <p className="sr-xs" style={{ textAlign: "center" }}>
-              {top && suggested != null ? "Drafting copies the price and marks the alert done." : dueCount ? `${dueCount} rule${dueCount === 1 ? "" : "s"} due. A check takes 20 to 60 seconds.` : "A check reads each official source again and quotes what changed."}
+              {top && suggested != null ? "Drafting copies the price and marks the alert done." : dueCount ? `${dueCount} of ${rules.length} rule${rules.length === 1 ? "" : "s"} due. Unchanged sources skip the model.` : "Nothing due. Every rule choice rereads all official sources."}
             </p>
           </SrCard>
 
           <SrCard className="sr-stack" style={{ order: 7 }}>
             <h2 className="sr-h2">Price history</h2>
-            <Sparkline points={price_history.map((p) => ({ at: p.at, price: Number(p.price) }))} markers={alerts.map((a) => a.created_at)} />
-            <p className="sr-xs">Red lines mark alerts. Points come from the listing, the extension, and checks.</p>
+            <PriceChart
+              history={price_history}
+              currency={currency}
+              markers={[
+                ...alerts.filter((a) => a.kind !== "price").map((a) => ({ t: Date.parse(a.created_at), kind: "alert" as const, label: a.headline })),
+                ...price_history.filter((p) => p.source === "reprice").map((p) => ({ t: Date.parse(p.at), kind: "reprice" as const, label: `Repriced to ${Number(p.price).toFixed(2)}` })),
+              ]}
+              caption="Points come from the listing when added, from the extension when you visit the page, and from the daily price refresh."
+            />
           </SrCard>
 
           <SrCard className="sr-stack" style={{ order: 8 }}>
             <h2 className="sr-h2">Standing instructions</h2>
-            {skills.length === 0 ? (
-              <p className="sr-sm">Dismiss an alert with a reason and Shop Rules writes it down here, then follows it on future checks.</p>
-            ) : (
-              <div className="sr-rows">
-                {skills.map((s) => (
-                  <div key={s.id} className="sr-kv">
-                    <span>{s.scope}</span>
-                    <span style={{ textAlign: "left", color: "var(--sr-text)" }}>{s.text}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+            <StandingInstructions
+              skills={skills}
+              onChanged={(note) => {
+                setNotice(note);
+                refresh();
+              }}
+            />
           </SrCard>
 
           <div style={{ order: 9, textAlign: "center" }}>

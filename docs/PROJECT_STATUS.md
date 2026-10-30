@@ -17,9 +17,9 @@ Dated entries, newest first. Numbers come from `docs/FACTS.md`; none are typed h
 - Research: every past "Best Use of Tavily" winner on Devpost, the judges' session transcript, Tavily's roadmap, the competitor set. `docs/tavily-personal-ai-research.md`.
 - Competitor teardown with REA on six Chrome extensions. `docs/competitors.md`.
 - App scaffolded: Next.js 14, Polaris 13, Tavily client, Nemotron client, verifier, rule catalog, Blob store, API routes, pages. First deploy attempt blocked by the cron schedule (Hobby plan), fixed to daily.
-- Ingest hardened after a tester saw products named "www.etsy.com" and "www.amazon.com": a bot wall is detected and dropped, Tavily Search by listing URL (restricted to the store, same listing id or ASIN) supplies the indexed listing when the fetch fails, titles on Etsy and Amazon come from the page title with the Amazon keyword tail cut, and a store homepage or a URL without a scheme is handled with a message that names the listing path shapes (D-11). Verified on a local server: one Etsy listing, two Amazon listings, two homepages.
+- Ingest hardened after a tester saw products named "www.etsy.com" and "www.amazon.com": a bot wall is detected and dropped, Tavily Search by listing URL (restricted to the store, same listing id or ASIN) supplies the indexed listing when the fetch fails, titles on Etsy and Amazon come from the page title with the Amazon keyword tail cut, and a store homepage or a URL without a scheme is handled with a message that names the listing path shapes (D-16). Verified on a local server: one Etsy listing, two Amazon listings, two homepages.
 - Facts regenerated on the final pipeline; the facts header now prints seconds next to milliseconds so the page can quote either.
-- Outage: at 03:25Z the Vercel Blob store was suspended under the Hobby usage threshold; production answered every request with "Vercel Blob: Failed to fetch blob: 403 Forbidden". Replaced the store with Postgres on a new free Supabase project behind the same interface (D-12), redeployed, and verified the public demo. Old workspaces were unreadable and are gone.
+- Outage: at 03:25Z the Vercel Blob store was suspended under the Hobby usage threshold; production answered every request with "Vercel Blob: Failed to fetch blob: 403 Forbidden". Replaced the store with Postgres on a new free Supabase project behind the same interface (D-17), redeployed, and verified the public demo. Old workspaces were unreadable and are gone.
 
 ## 2026-10-30 (UTC): verify pass before the freeze
 
@@ -52,7 +52,7 @@ Manual checks, observed:
 
 ## 2026-10-30 (UTC): /devpost setup applied to this repo, verify rerun
 
-Scaffolded and adapted: `docs/TASKS.md` (one need per sponsor), `seed/generate.mts` plus `seed/fixtures` (deterministic verifier fixture with a hidden answer key, byte-identical on two runs), `scripts/facts.mts` now scores the verifier and writes `docs/RESULTS.md` and deletes its workspace, `scripts/honesty.py` (the honesty block and every run-of timestamp), `scripts/demo_up.sh`, `scripts/full_run.sh`, `scripts/rehearse.sh`, `docs/RUNBOOK.md`, `docs/FACTS_CONTRACT.md`, `docs/RESULTS_HISTORY.md`, CI steps for fixture determinism and the honesty diff, `DELETE /api/account`. Verifier hardened from the first fixture score: fuzzy matches must carry every number, elided quotes are checked part by part (D-13).
+Scaffolded and adapted: `docs/TASKS.md` (one need per sponsor), `seed/generate.mts` plus `seed/fixtures` (deterministic verifier fixture with a hidden answer key, byte-identical on two runs), `scripts/facts.mts` now scores the verifier and writes `docs/RESULTS.md` and deletes its workspace, `scripts/honesty.py` (the honesty block and every run-of timestamp), `scripts/demo_up.sh`, `scripts/full_run.sh`, `scripts/rehearse.sh`, `docs/RUNBOOK.md`, `docs/FACTS_CONTRACT.md`, `docs/RESULTS_HISTORY.md`, CI steps for fixture determinism and the honesty diff, `DELETE /api/account`. Verifier hardened from the first fixture score: fuzzy matches must carry every number, elided quotes are checked part by part (D-18).
 
 Automated pass (`check_submission.py`, facts header 2026-10-30T04:42:00Z), observed output:
 
@@ -86,5 +86,5 @@ Verifier fixture: 8 of 10 planted misquotes rejected (let through: negated_long,
 | Six-hour cron | Hobby plan refuses more than daily | Daily cron plus manual runs (D-8) |
 | Per-rule writes during a check | Conflicts between parallel rules | One batched write (D-6) |
 | `assert_*` test names from Nano | The harness only ran `test_*` | Harness accepts `test_`, `assert_`, `check_`; prompt insists on `test_` |
-| Nano's title for an Amazon listing | Picked a related product's name out of a 160 KB page | Page title on Etsy and Amazon, classifier elsewhere (D-11) |
-| Vercel Blob as the workspace store | Suspended under the Hobby usage threshold after a day of testing; every read lists versions, an advanced operation | Postgres document store on Supabase (D-12); Blob kept as an alternative backend |
+| Nano's title for an Amazon listing | Picked a related product's name out of a 160 KB page | Page title on Etsy and Amazon, classifier elsewhere (D-16) |
+| Vercel Blob as the workspace store | Suspended under the Hobby usage threshold after a day of testing; every read lists versions, an advanced operation | Postgres document store on Supabase (D-17); Blob kept as an alternative backend |

@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useApi } from "@/lib/client";
 import type { AccountRow, AlertRow, ProductRow } from "@/lib/db";
-import { Chip, ChipRow, EmptyCard, groupAlertsByProduct, PriorityGroup, SectionHead, Skeleton, sortAlerts, SrButton, StatusPill } from "@/components/stitch";
+import { Chip, ChipRow, EmptyCard, groupAlertsByProduct, PageError, PriorityGroup, SectionHead, Skeleton, sortAlerts, SrButton, StatusPill } from "@/components/stitch";
 
 type Tab = "new" | "actioned" | "dismissed" | "all";
 const TABS: Array<{ id: Tab; label: string }> = [
@@ -39,6 +39,8 @@ export default function AlertsPage() {
     dismissed: { title: "Nothing dismissed", text: "Dismiss an alert with a reason and Shop Rules learns a standing instruction so it does not come back." },
     all: { title: "No alerts yet", text: "Watch a product and run a check to search the official sources for each rule." },
   };
+
+  if (alerts.error) return <PageError title="Alerts" subtitle="Every alert quotes the official source." error={alerts.error ?? ""} status={alerts.status} onRetry={() => { alerts.refresh(); products.refresh(); account.refresh(); }} />;
 
   return (
     <div className="sr-page">

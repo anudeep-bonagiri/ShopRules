@@ -9,32 +9,29 @@
     <header class="header">
       <img class="logo" src="icons/icon32.png" width="24" height="24" alt="" />
       <span class="brand">Shop Rules</span>
-      <span id="status" class="badge badge--neutral">Not connected</span>
+      <span id="status" class="badge badge--neutral" aria-live="polite">Checking</span>
     </header>
 
     <main>
-      <section class="card">
-        <h2>Account</h2>
-        <label class="field">
-          <span>Shop Rules URL</span>
-          <input id="base-url" type="url" placeholder="https://shop-rules.vercel.app" spellcheck="false" />
-        </label>
-        <label class="field">
-          <span>Account token</span>
-          <input id="token" type="password" placeholder="sr_live_..." autocomplete="off" spellcheck="false" />
-        </label>
-        <p class="hint">Copy the token from the Settings page of the web app.</p>
-        <div class="row">
-          <button id="save" class="btn btn--primary" type="button">Save</button>
-          <button id="test" class="btn" type="button">Test connection</button>
+      <section class="card" id="connection-card">
+        <div class="card__head">
+          <h2>Connection</h2>
+          <a id="settings-link" class="link" href="#" target="_blank" rel="noopener">Settings</a>
         </div>
-        <p id="test-result" class="result" hidden></p>
+        <p id="connection-line" class="muted">Checking the workspace token...</p>
+        <div class="row" id="connect-actions" hidden>
+          <a id="connect-link" class="btn btn--primary" href="#" target="_blank" rel="noopener">Connect from Shop Rules</a>
+        </div>
       </section>
 
-      <section class="card">
-        <h2>Open alerts</h2>
-        <p id="alerts-line" class="muted">Loading...</p>
-        <a id="alerts-link" class="btn btn--block" href="#" target="_blank" rel="noopener">View alerts</a>
+      <section class="card" id="watchlist-card">
+        <div class="card__head">
+          <h2>Watchlist</h2>
+          <span id="watch-count" class="muted small"></span>
+        </div>
+        <ul id="watchlist" class="list" aria-live="polite"></ul>
+        <p id="watchlist-line" class="muted">Loading...</p>
+        <a id="open-app" class="btn btn--block" href="#" target="_blank" rel="noopener">Open Shop Rules</a>
       </section>
 
       <section class="card">
@@ -44,12 +41,34 @@
         <p id="grant-result" class="result" hidden></p>
       </section>
 
+      <details class="card card--details" id="advanced">
+        <summary>Advanced</summary>
+        <label class="field">
+          <span>Shop Rules URL</span>
+          <input id="base-url" type="url" placeholder="https://shop-rules.vercel.app" spellcheck="false" />
+        </label>
+        <label class="field">
+          <span>Account token</span>
+          <input id="token" type="password" placeholder="sr_live_..." autocomplete="off" spellcheck="false" />
+        </label>
+        <p class="hint">Normally set by "Connect Chrome extension" on the Settings page. Paste by hand only if that page cannot see the extension.</p>
+        <div class="row">
+          <button id="save" class="btn btn--primary" type="button">Save</button>
+          <button id="test" class="btn" type="button">Test connection</button>
+        </div>
+        <p id="test-result" class="result" hidden></p>
+        <hr class="rule" />
+        <p class="hint">Force full recheck ignores the "unchanged source" shortcut and sends every rule of the product on this tab to the model. It costs model calls; use it when you believe a source changed and the check said otherwise.</p>
+        <button id="force" class="btn btn--block" type="button" disabled>Force full recheck of this product</button>
+        <p id="force-result" class="result" hidden></p>
+      </details>
+
       <section class="card">
         <h2>How to use</h2>
         <ol class="steps">
-          <li>Open a product on Amazon, Etsy, or your Shopify store.</li>
-          <li>Hover a product and press <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>, or click the green button in the corner.</li>
-          <li>Click Watch this product to seed its rules and get alerts.</li>
+          <li>Open a product on Amazon, Etsy, or your Shopify store, or hover one in search results.</li>
+          <li>Press <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>, or click the green button in the corner.</li>
+          <li>Click Watch this product. You get notified when its price or its rules change.</li>
         </ol>
       </section>
     </main>

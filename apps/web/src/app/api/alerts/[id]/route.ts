@@ -1,6 +1,7 @@
 import { ApiError, currentAccount, fail, json, readJson } from "@/lib/account";
 import { getAlert, getProduct, listRules, updateAlert } from "@/lib/db";
 import { skillFromDismissal } from "@/lib/pipeline";
+import { observePrice } from "@/lib/prices";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -29,6 +30,13 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     if (status !== "dismissed" && status !== "actioned" && status !== "new") throw new ApiError(400, "status must be new, dismissed, or actioned");
     const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 400) : "";
     const updated = await updateAlert(alert.id, { status, dismiss_reason: status === "dismissed" ? reason || null : null }, account.id);
+    // Drafting a reprice means the seller is applying it: the product price follows and the history gets a reprice point.
+    if (status === "actioned" && alert.status !== "actioned" && alert.pricing?.suggested_price != null) {
+      const product = await getProduct(account.id, alert.product_id);
+      if (product) {
+        await observePrice(account, product, { price: alert.pricing.suggested_price, currency: product.currency, source: "reprice" }).catch((err) => console.error("[shop-rules] reprice point failed", err));
+      }
+    }
     let skill = null;
     if (status === "dismissed" && reason.length >= 6) {
       const product = await getProduct(account.id, alert.product_id);

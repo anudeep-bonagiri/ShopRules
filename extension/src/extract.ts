@@ -1,6 +1,6 @@
 // Reads a product out of the page DOM. Order of trust: JSON-LD Product,
 // Open Graph meta, then marketplace-specific selectors.
-import type { Marketplace, PageProduct } from "./types";
+import type { FieldConfidence, FieldSource, Marketplace, PageProduct } from "./types";
 
 export interface CardProduct {
   url: string;
@@ -27,13 +27,16 @@ export function detectMarketplace(doc: Document = document, loc: Location = loca
   return "other";
 }
 
-function looksLikeShopify(doc: Document, loc: Location): boolean {
-  if (/\/products\/[^/?#]+/.test(loc.pathname)) return true;
-  if (doc.querySelector('link[href*="cdn.shopify.com"], script[src*="cdn.shopify.com"], meta[name^="shopify-"]')) {
-    return true;
-  }
+// Shopify on a custom domain: the Shopify global, the checkout token meta, or a
+// /products/<handle> path served with /cdn/shop/ assets.
+export function looksLikeShopify(doc: Document, loc: Location, win: Window | null = typeof window !== "undefined" ? window : null): boolean {
+  if (win && "Shopify" in win && (win as unknown as { Shopify?: unknown }).Shopify) return true;
+  if (doc.querySelector('meta[name="shopify-checkout-api-token"], meta[name="shopify-digital-wallet"], meta[name^="shopify-"]')) return true;
+  const hasShopAssets = doc.querySelector('link[href*="/cdn/shop/"], script[src*="/cdn/shop/"], img[src*="/cdn/shop/"], link[href*="cdn.shopify.com"], script[src*="cdn.shopify.com"]') !== null;
+  if (/\/products\/[^/?#]+/.test(loc.pathname) && hasShopAssets) return true;
+  if (hasShopAssets && /\/(collections|products|cart)(\/|$)/.test(loc.pathname)) return true;
   const scripts = Array.from(doc.scripts).slice(0, 60);
-  return scripts.some((script) => !script.src && (script.textContent ?? "").includes("Shopify"));
+  return scripts.some((script) => !script.src && /Shopify\.(shop|theme|routes)/.test(script.textContent ?? ""));
 }
 
 export function isProductPage(market: Marketplace, doc: Document = document, loc: Location = location): boolean {
@@ -93,17 +96,117 @@ function pageUrl(market: Marketplace, doc: Document): string {
 // Page product
 
 export function extractPageProduct(market: Marketplace, doc: Document = document): PageProduct {
-  const layers = [fromJsonLd(doc), fromOpenGraph(doc), fromSelectors(market, doc)];
-  const description = firstValue(layers, "description");
+  const layers: Array<[FieldSource, Layer]> = [
+    ["json_ld", fromJsonLd(doc)],
+    ["open_graph", fromOpenGraph(doc)],
+    ["selectors", fromSelectors(market, doc)],
+  ];
+  const pick = <K extends Field>(key: K): [NonNullable<Layer[K]> | null, FieldSource | undefined] => {
+    for (const [source, layer] of layers) {
+      const value = layer[key];
+      if (value !== undefined && value !== null && value !== "") return [value as NonNullable<Layer[K]>, source];
+    }
+    return [null, undefined];
+  };
+  const [title, titleSrc] = pick("title");
+  const [price, priceSrc] = pick("price");
+  const [currency, currencySrc] = pick("currency");
+  const [description, descriptionSrc] = pick("description");
+  const [materialsRaw, materialsSrc] = pick("materials");
+  const [image, imageSrc_] = pick("image");
+  const confidence: FieldConfidence = {};
+  if (titleSrc) confidence.title = titleSrc;
+  else if (pageTitle(doc)) confidence.title = "text";
+  if (priceSrc) confidence.price = priceSrc;
+  if (currencySrc) confidence.currency = currencySrc;
+  if (descriptionSrc) confidence.description = descriptionSrc;
+  // A materials label can sit in any layer's description, not only the winning one.
+  const materialsText = materialsRaw ?? layers.map(([, l]) => materialsFromText(l.description ?? null)).find(Boolean) ?? materialsFromText(description);
+  if (materialsSrc) confidence.materials = materialsSrc;
+  else if (materialsText) confidence.materials = "text";
+  if (imageSrc_) confidence.image = imageSrc_;
   return {
     url: pageUrl(market, doc),
-    title: firstValue(layers, "title") ?? pageTitle(doc),
-    price: firstValue(layers, "price"),
-    currency: firstValue(layers, "currency"),
+    title: title ?? pageTitle(doc),
+    price,
+    currency,
     description,
-    materials: firstValue(layers, "materials") ?? materialsFromText(description),
-    image: firstValue(layers, "image"),
+    materials: splitMaterials(materialsText),
+    image,
+    confidence,
   };
+}
+
+// Shopify exposes every product as public JSON at /products/<handle>.json:
+// exact price and variants, images, product_type, tags, vendor. Preferred over
+// the DOM when it answers; the DOM result fills any gap.
+export interface ShopifyProductJson {
+  product?: {
+    title?: string;
+    body_html?: string;
+    vendor?: string;
+    product_type?: string;
+    tags?: string | string[];
+    variants?: Array<{ price?: string | number; available?: boolean; title?: string }>;
+    images?: Array<{ src?: string }>;
+    image?: { src?: string } | null;
+  };
+}
+
+export function productFromShopifyJson(doc: ShopifyProductJson, url: string, dom: PageProduct | null): PageProduct | null {
+  const p = doc?.product;
+  if (!p || typeof p !== "object") return null;
+  const variants = Array.isArray(p.variants) ? p.variants : [];
+  const variant = variants.find((v) => v.available !== false && v.price != null) ?? variants[0];
+  const price = parsePrice(variant?.price != null ? String(variant.price) : null);
+  const tags = Array.isArray(p.tags) ? p.tags : typeof p.tags === "string" ? p.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
+  const description = truncate(stripHtml(p.body_html ?? "")) ?? dom?.description ?? null;
+  const image = p.image?.src ?? p.images?.[0]?.src ?? dom?.image ?? null;
+  const confidence: FieldConfidence = { ...(dom?.confidence ?? {}) };
+  if (p.title) confidence.title = "api";
+  if (price !== null) confidence.price = "api";
+  if (description) confidence.description = p.body_html ? "api" : confidence.description;
+  if (image) confidence.image = p.image?.src || p.images?.[0]?.src ? "api" : confidence.image;
+  const materialsRaw = materialsFromText(description) ?? dom?.materials?.join(", ") ?? null;
+  if (materialsRaw) confidence.materials = materialsFromText(description) ? "text" : confidence.materials;
+  return {
+    url,
+    title: clean(p.title) ?? dom?.title ?? null,
+    price: price ?? dom?.price ?? null,
+    currency: dom?.currency ?? null,
+    description,
+    materials: splitMaterials(materialsRaw),
+    image,
+    confidence,
+    vendor: clean(p.vendor) ?? null,
+    product_type: clean(p.product_type) ?? null,
+    tags: tags.length ? tags.slice(0, 20) : null,
+  };
+}
+
+export function shopifyJsonUrl(loc: Location = location): string | null {
+  const m = loc.pathname.match(/^(.*\/products\/[^/?#]+)/);
+  return m ? `${loc.origin}${m[1]}.json` : null;
+}
+
+export async function extractPageProductAsync(market: Marketplace, doc: Document = document, loc: Location = location): Promise<PageProduct> {
+  const dom = extractPageProduct(market, doc);
+  if (market !== "shopify") return dom;
+  const jsonUrl = shopifyJsonUrl(loc);
+  if (!jsonUrl) return dom;
+  try {
+    const res = await fetch(jsonUrl, { headers: { accept: "application/json" }, credentials: "omit" });
+    if (!res.ok) return dom;
+    const data = (await res.json()) as ShopifyProductJson;
+    return productFromShopifyJson(data, dom.url, dom) ?? dom;
+  } catch {
+    return dom;
+  }
+}
+
+function stripHtml(html: string): string | null {
+  if (!html) return null;
+  return clean(html.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"'));
 }
 
 // The document title is the last resort. A bare hostname (bot walls, error
@@ -118,13 +221,8 @@ function pageTitle(doc: Document): string | null {
 
 type Field = Exclude<keyof PageProduct, "url">;
 
-function firstValue<K extends Field>(layers: Array<Partial<PageProduct>>, key: K): PageProduct[K] | null {
-  for (const layer of layers) {
-    const value = layer[key];
-    if (value !== undefined && value !== null && value !== "") return value;
-  }
-  return null;
-}
+// Raw layer: materials is still the text the markup gave us; it is split once at the end.
+type Layer = Partial<Omit<PageProduct, "materials">> & { materials?: string | null };
 
 // JSON-LD is free-form, so this walker takes `any` and checks shapes by hand.
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -180,7 +278,7 @@ function ldList(value: any): string | null {
   return str(value);
 }
 
-function fromJsonLd(doc: Document): Partial<PageProduct> {
+function fromJsonLd(doc: Document): Layer {
   const node = findLdProduct(doc);
   if (!node) return {};
   const offer = firstOffer(node.offers);
@@ -197,7 +295,7 @@ function fromJsonLd(doc: Document): Partial<PageProduct> {
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-function fromOpenGraph(doc: Document): Partial<PageProduct> {
+function fromOpenGraph(doc: Document): Layer {
   const priceText = meta(doc, 'meta[property="og:price:amount"]') ?? meta(doc, 'meta[property="product:price:amount"]');
   return {
     title: meta(doc, 'meta[property="og:title"]'),
@@ -211,7 +309,7 @@ function fromOpenGraph(doc: Document): Partial<PageProduct> {
   };
 }
 
-function fromSelectors(market: Marketplace, doc: Document): Partial<PageProduct> {
+function fromSelectors(market: Marketplace, doc: Document): Layer {
   switch (market) {
     case "amazon": {
       const priceText = firstText(doc, [
@@ -243,9 +341,11 @@ function fromSelectors(market: Marketplace, doc: Document): Partial<PageProduct>
       };
     }
     case "shopify": {
+      // Dawn classes first, then any theme's price element, then the first amount near the title.
       const priceText =
         meta(doc, 'meta[property="og:price:amount"]') ??
-        firstText(doc, [".price-item--sale", ".price-item--regular", ".product__price", ".price"]);
+        firstText(doc, [".price-item--sale", ".price-item--regular", ".product__price", ".price", '[itemprop="price"]', '[data-product-price]', '[class*="ProductPrice"]', '[class*="product-price"]', '[class*="PdpPrice"]', '[class*="Price"]', '[class*="price"]']) ??
+        priceNearTitle(doc);
       return {
         title: text(doc, "h1"),
         price: parsePrice(priceText),
@@ -259,6 +359,16 @@ function fromSelectors(market: Marketplace, doc: Document): Partial<PageProduct>
     default:
       return { title: text(doc, "h1"), image: imageSrc(doc, "main img") };
   }
+}
+
+// First currency amount in the text that follows the h1, for themes with no known price class.
+function priceNearTitle(doc: Document): string | null {
+  const h1 = doc.querySelector("h1");
+  const scope = h1?.closest("main, section, article, div") ?? doc.body;
+  const text = clean(scope?.textContent) ?? "";
+  const after = h1 ? text.slice(Math.max(0, text.indexOf(clean(h1.textContent) ?? ""))) : text;
+  const m = after.match(/(?:US\$|CA\$|A\$|\$|€|£|¥|₹)\s?\d[\d.,]*/);
+  return m?.[0] ?? null;
 }
 
 // Product cards on search and collection pages
@@ -415,6 +525,17 @@ export function currencyFromText(raw: string | null | undefined): string | null 
 function materialsFromText(description: string | null): string | null {
   const m = description?.match(/\bmaterials?\s*[:\-]\s*([^\n.;|]{2,120})/i);
   return clean(m?.[1]) ?? null;
+}
+
+// "Beech wood, water-based paint; cotton" -> ["beech wood", "water-based paint", "cotton"].
+export function splitMaterials(raw: string | null | undefined): string[] | null {
+  if (!raw) return null;
+  const parts = raw
+    .split(/[,;|/]|\band\b|\s{2,}/i)
+    .map((p) => p.replace(/^\s*(?:made (?:of|from|with)\s*)?/i, "").trim().toLowerCase())
+    .filter((p) => p.length >= 2 && p.length <= 40);
+  const unique = Array.from(new Set(parts)).slice(0, 10);
+  return unique.length ? unique : null;
 }
 
 // DOM helpers

@@ -1,38 +1,25 @@
 "use client";
 
-import { Banner, Button, TextField } from "@shopify/polaris";
+import { Banner } from "@shopify/polaris";
 import { ChevronRightIcon } from "@shopify/polaris-icons";
 import NextLink from "next/link";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { api, timeAgo, useApi } from "@/lib/client";
+import { timeAgo, useApi } from "@/lib/client";
 import { fmtMoney } from "@/lib/economics";
+import { deltaSummary, sparklinePath, toChartPoints } from "@/lib/chart";
 import type { ProductRow } from "@/lib/db";
-import { EmptyCard, marketplaceLabel, ProductThumb, Skeleton, SrButton, SrCard, StatusPill } from "@/components/stitch";
+import { EmptyCard, marketplaceLabel, PageError, ProductThumb, Skeleton, SrButton, SrCard, StatusPill } from "@/components/stitch";
+import { WatchForm } from "@/components/WatchForm";
 
 export default function InspectorListPage() {
-  const router = useRouter();
-  const [url, setUrl] = useState("");
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { data, loading } = useApi<{ products: ProductRow[] }>("/api/products");
+  const list = useApi<{ products: ProductRow[] }>("/api/products");
+  const { data, loading } = list;
   const products = data?.products ?? [];
   const openTotal = products.reduce((s, p) => s + (p.open_alerts ?? 0), 0);
 
-  async function add() {
-    if (!url.trim()) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await api<{ product: ProductRow }>("/api/products", { method: "POST", json: { url: url.trim() } });
-      setUrl("");
-      router.push(`/products/${r.product.id}`);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
+
+  if (list.error) return <PageError title="Inspector" subtitle="Every product you watch. Tap one for its price math, open alerts, and compliance audit." error={list.error ?? ""} status={list.status} onRetry={list.refresh} />;
 
   return (
     <div className="sr-page">
@@ -59,21 +46,7 @@ export default function InspectorListPage() {
 
       <SrCard className="sr-stack">
         <h2 className="sr-h2">Watch a listing</h2>
-        <TextField
-          label="Listing URL"
-          labelHidden
-          value={url}
-          onChange={setUrl}
-          autoComplete="off"
-          placeholder="https://www.amazon.com/dp/..."
-          clearButton
-          onClearButtonClick={() => setUrl("")}
-          connectedRight={
-            <Button variant="primary" onClick={add} loading={busy} disabled={!url.trim()}>
-              Watch product
-            </Button>
-          }
-        />
+        <WatchForm placeholder="https://www.amazon.com/dp/..." buttonLabel="Watch product" />
       </SrCard>
 
       {loading ? (
@@ -100,6 +73,7 @@ export default function InspectorListPage() {
                     </span>
                   </div>
                 </div>
+                <PriceCell points={p.price_points ?? []} />
                 <div className="sr-right sr-stack" style={{ gap: 4, alignItems: "flex-end" }}>
                   <span className="sr-body sr-num" style={{ fontWeight: 600 }}>
                     {fmtMoney(p.price, p.currency || "USD")}
@@ -120,6 +94,28 @@ export default function InspectorListPage() {
           </div>
         </SrCard>
       )}
+    </div>
+  );
+}
+
+// Change since first seen and a 30-point sparkline, from the product's stored
+// price points. Gain and loss use the shared tokens; no color without a number.
+function PriceCell({ points }: { points: Array<{ at: string; price: number }> }) {
+  const pts = toChartPoints(points);
+  const d = deltaSummary(pts);
+  if (!d || pts.length < 2) return <span className="sr-xs sr-desktop-only" style={{ width: 120, textAlign: "right" }}>no history yet</span>;
+  const up = d.direction === "up";
+  const flat = d.direction === "flat";
+  const color = flat ? "var(--sr-text-2)" : up ? "var(--sr-primary)" : "var(--sr-critical)";
+  const { path } = sparklinePath(pts, 84, 22);
+  return (
+    <div className="sr-desktop-only sr-stack" style={{ alignItems: "flex-end", gap: 2, width: 120 }}>
+      <span className="sr-xs sr-num" style={{ color, fontWeight: 600 }}>
+        {flat ? "=" : up ? "\u2191" : "\u2193"} {Math.abs(d.pct).toFixed(1)}% since added
+      </span>
+      <svg width="84" height="22" viewBox="0 0 84 22" aria-hidden focusable="false">
+        <path d={path} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+      </svg>
     </div>
   );
 }

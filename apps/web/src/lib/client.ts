@@ -37,6 +37,7 @@ export async function api<T>(path: string, init?: RequestInit & { json?: unknown
 export function useApi<T>(path: string | null, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<number | null>(null);
   const [loading, setLoading] = useState<boolean>(Boolean(path));
   const [tick, setTick] = useState(0);
   const refresh = useCallback(() => setTick((t) => t + 1), []);
@@ -50,10 +51,14 @@ export function useApi<T>(path: string | null, deps: unknown[] = []) {
         if (!cancelled) {
           setData(d);
           setError(null);
+          setStatus(200);
         }
       })
       .catch((e: Error) => {
-        if (!cancelled) setError(e.message);
+        if (!cancelled) {
+          setError(e.message);
+          setStatus(e instanceof ClientError ? e.status : 0);
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -64,7 +69,7 @@ export function useApi<T>(path: string | null, deps: unknown[] = []) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, tick, ...deps]);
 
-  return { data, error, loading, refresh, setData };
+  return { data, error, status, loading, refresh, setData };
 }
 
 export function money(value: number | null | undefined, currency: string | null | undefined = "USD"): string {

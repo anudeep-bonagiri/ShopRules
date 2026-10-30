@@ -1,18 +1,32 @@
 {
   "manifest_version": 3,
   "name": "Shop Rules",
-  "version": "0.1.0",
-  "description": "Shows the tariff, product safety, and sales-tax rules that touch a product listing, with open alerts, price history, and competitor prices.",
+  "version": "0.2.0",
+  "description": "Hover a listing, press Alt+Shift+S: price, landed cost, duty exposure, the rules that touch it, verified alerts, and a one-click watch with price tracking.",
   "minimum_chrome_version": "116",
-  "permissions": ["storage", "alarms", "notifications", "activeTab", "scripting"],
+  "permissions": [
+    "storage",
+    "alarms",
+    "notifications",
+    "activeTab",
+    "scripting",
+    "tabs"
+  ],
   "host_permissions": [
     "https://*.amazon.com/*",
+    "https://*.amazon.co.uk/*",
+    "https://*.amazon.ca/*",
+    "https://*.amazon.de/*",
     "https://*.etsy.com/*",
     "https://*.myshopify.com/*",
     "http://localhost:3000/*",
+    "http://localhost:3100/*",
+    "https://shop-rules.vercel.app/*",
     "https://*.vercel.app/*"
   ],
-  "optional_host_permissions": ["https://*/*"],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
   "background": {
     "service_worker": "background.js",
     "type": "module"
@@ -45,10 +59,26 @@
     {
       "matches": [
         "https://*.amazon.com/*",
+        "https://*.amazon.co.uk/*",
+        "https://*.amazon.ca/*",
+        "https://*.amazon.de/*",
         "https://*.etsy.com/*",
         "https://*.myshopify.com/*"
       ],
-      "js": ["content.js"],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://shop-rules.vercel.app/*",
+        "http://localhost:3000/*",
+        "http://localhost:3100/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ]

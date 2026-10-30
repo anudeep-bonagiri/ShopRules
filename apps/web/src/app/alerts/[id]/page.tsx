@@ -9,6 +9,7 @@ import type { AccountRow, AlertRow, ProductRow, RuleRow, SkillRow } from "@/lib/
 import { fmtMoney, fmtPct } from "@/lib/economics";
 import { FAMILY_LABEL } from "@/lib/rules-catalog";
 import { EvidenceBar } from "@/components/ui";
+import { SourceTrailCard } from "@/components/SourceTrail";
 import { AccentCard, alertEconomics, alertTone, BackLink, DutyImpact, effectiveLabel, fmtDate, hostOf, KV, marketplaceLabel, ProductThumb, RepriceBlock, Skeleton, sourceDomain, SrButton, SrCard, StatusPill } from "@/components/stitch";
 
 type Detail = { alert: AlertRow; product: ProductRow | null; rule: RuleRow | null; sources: AlertRow["sources"] };
@@ -97,7 +98,7 @@ export default function AlertPage() {
   const domain = sourceDomain(alert);
   const hts = product?.profile?.hts_candidates?.[0];
   const isOpen = alert.status === "new";
-  const suggestedRaw = act?.suggested_price ?? null;
+  const suggestedRaw = econ?.suggested_price ?? null;
   // A suggestion equal to the current price is not a reprice; show the steps instead.
   const suggested = suggestedRaw != null && product?.price != null && Math.abs(suggestedRaw - product.price) < 0.005 ? null : suggestedRaw;
   const effective = fmtDate(alert.impact?.effective_date);
@@ -174,10 +175,12 @@ export default function AlertPage() {
             {act.rationale ? <p className="sr-xs">{act.rationale}</p> : null}
             {isOpen && suggested != null ? (
               <div className="sr-inset">
-                <RepriceBlock price={suggested} currency={currency} preservedPct={econ?.preserved_margin_pct ?? null} retailDelta={econ?.retail_delta ?? (product?.price != null ? suggested - product.price : null)} onDraft={() => draftReprice(suggested, currency)} busy={busy === "draft"} />
+                <RepriceBlock price={suggested} currency={currency} preservedPct={econ?.preserved_margin_pct ?? null} retailDelta={econ?.retail_delta ?? (product?.price != null ? suggested - product.price : null)} explanation={econ?.pricing?.explanation ?? null} onDraft={() => draftReprice(suggested, currency)} busy={busy === "draft"} />
               </div>
             ) : suggestedRaw != null ? (
               <p className="sr-xs sr-num">{suggested == null ? `The suggested price matches the current ${fmtMoney(suggestedRaw, currency)}, so no reprice is needed yet.` : `Suggested price was ${fmtMoney(suggestedRaw, currency)}.`}</p>
+            ) : econ?.pricing && econ.pricing.strategy === "absorb" && econ.pricing.basis !== "none" ? (
+              <p className="sr-xs">{econ.pricing.explanation}</p>
             ) : null}
             <div className="sr-row" style={{ gap: 8, flexWrap: "wrap" }}>
               {isOpen ? (
@@ -206,6 +209,18 @@ export default function AlertPage() {
             </div>
             <EvidenceBar proposed={alert.proposed} backed={alert.backed} rejected={alert.rejected} />
             <p className="sr-xs">Each claim comes with a quote. A claim is kept only when that quote appears in the text read from the source. Rejected claims stay visible so you can see what was dropped.</p>
+            {alert.guardrails?.length ? (
+              <div className="sr-wash sr-wash--info sr-stack sr-stack--tight" role="note">
+                <p className="sr-xs" style={{ fontWeight: 600 }}>
+                  Guardrails adjusted this verdict ({alert.guardrails.length})
+                </p>
+                {alert.guardrails.map((g, i) => (
+                  <p key={i} className="sr-xs">
+                    {g.message}
+                  </p>
+                ))}
+              </div>
+            ) : null}
             {alert.claims.length === 0 ? (
               <p className="sr-sm">No claims were proposed for this alert.</p>
             ) : (
@@ -242,29 +257,16 @@ export default function AlertPage() {
                 ["Effective date", effective ?? "Not stated"],
                 ["Duty change", alert.impact.tariff_rate_change_pct != null ? `${alert.impact.tariff_rate_change_pct > 0 ? "+" : ""}${alert.impact.tariff_rate_change_pct} pts` : "n/a"],
                 ["Est. cost change", alert.impact.estimated_cost_change_pct != null ? fmtPct(alert.impact.estimated_cost_change_pct, 1, true) : "n/a"],
+                ...(alert.impact.nexus && (alert.impact.nexus.dollars != null || alert.impact.nexus.transactions != null)
+                  ? [["Nexus threshold", `${[alert.impact.nexus.dollars != null ? `$${alert.impact.nexus.dollars.toLocaleString("en-US")}` : null, alert.impact.nexus.transactions != null ? `${alert.impact.nexus.transactions} transactions` : null].filter(Boolean).join(alert.impact.nexus.operator === "and" ? " and " : " or ")}${alert.impact.nexus_verified ? ", quoted from the source" : ""}`] as [string, string]]
+                  : []),
                 ["Rule", rule?.title ?? "n/a"],
               ]}
             />
           </SrCard>
 
           <SrCard className="sr-stack" style={{ order: 5 }}>
-            <h2 className="sr-h2">Sources read</h2>
-            {alert.sources.length === 0 ? (
-              <p className="sr-sm">No sources recorded.</p>
-            ) : (
-              <div className="sr-rows">
-                {alert.sources.map((s) => (
-                  <div key={s.url} className="sr-stack" style={{ padding: "8px 0", gap: 2 }}>
-                    <span className="sr-xs" style={{ fontWeight: 600, color: "var(--sr-text)" }}>
-                      {s.domain}
-                    </span>
-                    <a href={s.url} target="_blank" rel="noopener noreferrer" className="sr-link" style={{ fontSize: 12, display: "block", wordBreak: "break-word" }}>
-                      {s.title || s.url}
-                    </a>
-                  </div>
-                ))}
-              </div>
-            )}
+            <SourceTrailCard trail={alert.trail} sources={alert.sources} />
           </SrCard>
 
           {product ? (

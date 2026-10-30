@@ -9,7 +9,9 @@ import { usePathname } from "next/navigation";
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { timeAgo } from "@/lib/client";
 import type { AccountRow, AlertRow, ProductRow } from "@/lib/db";
-import { computeEconomics, fmtCompact, fmtMoney, fmtPct, type Economics } from "@/lib/economics";
+import { economicsFromPricing, fmtCompact, fmtMoney, fmtPct, type Economics } from "@/lib/economics";
+import { pricingForAlert } from "@/lib/pricing";
+import { effectivePrice, pricingProduct } from "@/lib/product";
 import { FAMILY_LABEL } from "@/lib/rules-catalog";
 
 export type Tone = "critical" | "warning" | "success" | "info" | "neutral";
@@ -121,15 +123,15 @@ export function trimNumber(v: number, digits = 1): string {
   return s.replace(/\.0+$/, "");
 }
 
+// Alerts carry the PricingResult the server computed when they were raised; older
+// alerts without one are recomputed from the same facts with the same function.
 export function alertEconomics(alert: AlertRow, product: ProductRow | null | undefined, settings: Settings): Economics | null {
-  if (!product || product.price == null) return null;
-  return computeEconomics({
-    price: product.price,
-    unit_cost_pct: settings?.unit_cost_pct,
-    duty_delta_pct: alert.impact?.tariff_rate_change_pct ?? null,
-    units_per_week: settings?.units_per_week,
-    suggested_price: alert.action?.suggested_price ?? null,
-  });
+  const price = product ? effectivePrice(product) : null;
+  if (!product || price == null) return null;
+  const econ = economicsFromPricing(price, pricingForAlert(alert, pricingProduct(product), settings));
+  if (!econ) return null;
+  econ.duty_delta_pct = alert.impact?.tariff_rate_change_pct ?? null;
+  return econ;
 }
 
 export function weeklyDrag(econ: Economics | null): number {
@@ -190,7 +192,7 @@ export function StatusPill({ tone = "neutral", dot, live, caps = true, children,
 
 export function ChipRow({ children, label }: { children: ReactNode; label?: string }) {
   return (
-    <div className="sr-chips" role="tablist" aria-label={label}>
+    <div className="sr-chips" role="group" aria-label={label}>
       {children}
     </div>
   );
@@ -198,7 +200,7 @@ export function ChipRow({ children, label }: { children: ReactNode; label?: stri
 
 export function Chip({ active, onClick, children, count }: { active?: boolean; onClick?: () => void; children: ReactNode; count?: number }) {
   return (
-    <button type="button" role="tab" aria-selected={Boolean(active)} className={cx("sr-chip", active && "sr-chip--active")} onClick={onClick}>
+    <button type="button" aria-pressed={Boolean(active)} className={cx("sr-chip", active && "sr-chip--active")} onClick={onClick}>
       {children}
       {count != null ? <span className="sr-chip__count">{count}</span> : null}
     </button>
@@ -260,7 +262,11 @@ export function ProgressRow({ label, value, pct, tone = "success", foot }: { lab
       <div className={cx("sr-progress", tone === "critical" && "sr-progress--critical", tone === "warning" && "sr-progress--warning")}>
         <span style={{ width: `${width}%` }} />
       </div>
-      {foot ? <div className="sr-row sr-row--between sr-xs">{foot}</div> : null}
+      {foot ? (
+        <div className="sr-row sr-row--between sr-row--wrap sr-xs" style={{ alignItems: "flex-start", gap: "2px 8px" }}>
+          {foot}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -292,7 +298,7 @@ export function AuditRow({ title, state, sub, children }: { title: string; state
   );
 }
 
-export function RepriceBlock({ price, currency, preservedPct, retailDelta, onDraft, busy, done }: { price: number; currency: string; preservedPct: number | null; retailDelta: number | null; onDraft: () => void; busy?: boolean; done?: boolean }) {
+export function RepriceBlock({ price, currency, preservedPct, retailDelta, explanation, onDraft, busy, done }: { price: number; currency: string; preservedPct: number | null; retailDelta: number | null; explanation?: string | null; onDraft: () => void; busy?: boolean; done?: boolean }) {
   return (
     <div className="sr-stack">
       <div className="sr-row sr-row--between sr-row--top">
@@ -314,6 +320,7 @@ export function RepriceBlock({ price, currency, preservedPct, retailDelta, onDra
           {retailDelta != null ? <p className="sr-xs sr-num">{signedMoney(retailDelta, currency)} retail</p> : null}
         </div>
       </div>
+      {explanation ? <p className="sr-xs">{explanation}</p> : null}
       <SrButton variant="primary" block onClick={onDraft} loading={busy} disabled={done}>
         {done ? "Price copied" : `Draft reprice (${fmtMoney(price, currency)})`}
       </SrButton>
@@ -483,6 +490,52 @@ export function EmptyCard({ title, text, children }: { title: string; text?: str
   );
 }
 
+// Honest failure: what failed and what to do. A 401 means this browser has no
+// workspace cookie or sent a bad token; everything else gets the server's message.
+export function ErrorState({ error, status, onRetry, compact }: { error: string; status?: number | null; onRetry?: () => void; compact?: boolean }) {
+  const unauthorized = status === 401 || status === 403;
+  const title = unauthorized ? "This browser is not connected to a workspace" : status === 0 ? "Shop Rules is unreachable" : status === 429 ? "Daily limit reached" : "Could not load this page";
+  return (
+    <div className={cx("sr-card sr-empty sr-empty--error", compact && "sr-empty--compact")} role="alert">
+      <div className="sr-empty__title">{title}</div>
+      <p className="sr-empty__text">
+        {unauthorized ? "Open Settings to see your workspace token, or reload to get a fresh workspace cookie. " : ""}
+        {error}
+      </p>
+      <div className="sr-empty__actions">
+        {onRetry ? (
+          <SrButton variant="primary" onClick={onRetry}>
+            Retry
+          </SrButton>
+        ) : null}
+        {unauthorized ? (
+          <NextLink className="sr-link" href="/settings">
+            Open Settings
+          </NextLink>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+export function PageError({ title, subtitle, error, status, onRetry }: { title: string; subtitle?: string; error: string; status?: number | null; onRetry?: () => void }) {
+  return (
+    <div className="sr-page">
+      <div className="sr-topline">
+        <div className="sr-grow">
+          <h1 className="sr-h1">{title}</h1>
+          {subtitle ? (
+            <p className="sr-sm" style={{ marginTop: 4 }}>
+              {subtitle}
+            </p>
+          ) : null}
+        </div>
+      </div>
+      <ErrorState error={error} status={status} onRetry={onRetry} />
+    </div>
+  );
+}
+
 export function Skeleton({ lines = 3, card = true }: { lines?: number; card?: boolean }) {
   const widths = ["62%", "88%", "44%", "76%", "58%"];
   const body = (
@@ -543,7 +596,7 @@ export function AlertRowItem({ alert, product, settings, showProduct }: { alert:
       <div className="sr-row sr-row--between" style={{ gap: 8 }}>
         <div className="sr-row sr-row--wrap" style={{ gap: 6 }}>
           {pill}
-          <span className="sr-xs">{FAMILY_SHORT[alert.family] ?? alert.family}</span>
+          <span className="sr-xs">{alert.kind === "price" ? "Price change" : (FAMILY_SHORT[alert.family] ?? alert.family)}</span>
           {showProduct && product ? <span className="sr-xs sr-truncate">{product.title}</span> : null}
         </div>
         <span className="sr-xs sr-num sr-right">{timeAgo(alert.created_at)}</span>
@@ -606,7 +659,7 @@ export function PriorityGroup({ product, alerts, settings, fallbackTitle }: { pr
             {product?.profile?.hts_candidates?.[0]?.code ? <span className="sr-xs sr-num sr-truncate">HS {product.profile.hts_candidates[0].code}</span> : null}
           </div>
         </div>
-        <div className="sr-row" style={{ gap: 8 }}>
+        <div className="sr-row" style={{ gap: 8, flexShrink: 0 }}>
           <StatusPill tone={openCount > 0 ? "critical" : "neutral"} caps={false}>
             {alerts.length} alert{alerts.length === 1 ? "" : "s"}
           </StatusPill>

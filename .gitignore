@@ -11,6 +11,5 @@ dist/
 *.log
 tsconfig.tsbuildinfo
 .vercel
-
-# Keep the packaged extension so judges can install it without a build
+.sr-data/
 !extension/shop-rules-extension.zip

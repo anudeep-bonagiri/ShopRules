@@ -16,7 +16,7 @@ export async function GET(req: Request) {
     const rules = product ? await listRules(product.id, account.id) : [];
     const families = product
       ? Array.from(new Set(rules.map((r) => r.family)))
-      : ["tariff", "safety", marketplace === "shopify" ? "tax" : "tax", "policy"];
+      : ["tariff", "safety", "tax", "policy"];
     return json({ watched: Boolean(product), product, rules, marketplace, families_preview: families });
   } catch (err) {
     return fail(err);

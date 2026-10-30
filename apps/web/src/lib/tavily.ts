@@ -1,4 +1,6 @@
 import type { Meter } from "./schemas";
+import { offlineMode } from "./offline";
+import { cannedExtract, cannedSearch } from "./canned";
 
 // Thin fetch client over the Tavily REST API. With TAVILY_API_KEY set it uses
 // the key; without it, Search and Extract run in Tavily's free keyless mode so a
@@ -84,6 +86,7 @@ async function post<T>(path: string, body: unknown, meter: Meter | undefined, cr
 }
 
 export async function tavilySearch(params: TavilySearchParams, meter?: Meter): Promise<TavilySearchResponse> {
+  if (offlineMode().tavily === "canned") return cannedSearch(params, meter);
   const depth = params.search_depth ?? "advanced";
   const credits = depth === "advanced" ? 2 : 1;
   const body: Record<string, unknown> = {
@@ -112,6 +115,7 @@ export async function tavilyExtract(
   meter?: Meter,
 ): Promise<TavilyExtractResponse> {
   const clean = Array.from(new Set(urls.filter(Boolean))).slice(0, 10);
+  if (offlineMode().tavily === "canned") return cannedExtract(clean, meter);
   const body: Record<string, unknown> = {
     urls: clean,
     extract_depth: opts.extract_depth ?? "basic",
@@ -126,6 +130,7 @@ export async function tavilyExtract(
 }
 
 export async function tavilyMap(url: string, opts: { instructions?: string; max_depth?: number; limit?: number } = {}, meter?: Meter) {
+  if (offlineMode().tavily === "canned") return { base_url: url, results: [] as string[] };
   if (tavilyMode() === "keyless") throw new Error("Tavily Map needs TAVILY_API_KEY (keyless mode only covers Search and Extract).");
   return post<{ base_url: string; results: string[] }>(
     "/map",
@@ -140,6 +145,7 @@ export async function tavilyCrawl(
   opts: { instructions?: string; max_depth?: number; limit?: number; chunks_per_source?: number } = {},
   meter?: Meter,
 ) {
+  if (offlineMode().tavily === "canned") return { base_url: url, results: [] as Array<{ url: string; raw_content: string }> };
   if (tavilyMode() === "keyless") throw new Error("Tavily Crawl needs TAVILY_API_KEY (keyless mode only covers Search and Extract).");
   return post<{ base_url: string; results: Array<{ url: string; raw_content: string }> }>(
     "/crawl",

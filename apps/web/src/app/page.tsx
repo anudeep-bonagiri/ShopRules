@@ -1,18 +1,19 @@
 "use client";
 
-import { Banner, Button, TextField } from "@shopify/polaris";
+import { Banner, Button } from "@shopify/polaris";
 import NextLink from "next/link";
-import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { api, timeAgo, useApi } from "@/lib/client";
 import type { AccountRow, AlertRow, ForgeRow, ProductRow, RuleRow } from "@/lib/db";
-import { thresholdAmount } from "@/lib/economics";
-import { STATES } from "@/lib/rules-catalog";
+import { nexusProgress, nexusSeed } from "@/lib/nexus";
+import type { NexusVerification } from "@/lib/nexus-crawl";
 import {
   alertEconomics,
   Chip,
   ChipRow,
   EmptyCard,
+  fmtDate,
+  PageError,
   FAMILY_SHORT,
   fmtShort,
   groupAlertsByProduct,
@@ -23,23 +24,39 @@ import {
   SectionHead,
   Skeleton,
   sortAlerts,
+  sourceDomain,
   SrButton,
   SrCard,
   StatusPill,
   weeklyDrag,
-  type Tone,
 } from "@/components/stitch";
+import { WatchForm } from "@/components/WatchForm";
 
-type Health = { ok: boolean; tavily_mode: string; nemotron_configured: boolean; storage_configured: boolean };
+type Health = { ok: boolean; tavily_mode: string; nemotron_configured: boolean; storage_configured: boolean; mode?: { store: "blob" | "local"; models: "live" | "canned"; tavily: "live" | "canned" } };
 type Rule = RuleRow & { product_title: string };
-type Family = "all" | "tariff" | "tax" | "safety" | "policy";
-const FAMILIES: Family[] = ["all", "tariff", "tax", "safety", "policy"];
+type Family = "all" | "tariff" | "tax" | "safety" | "policy" | "price";
+const FAMILIES: Family[] = ["all", "tariff", "tax", "safety", "policy", "price"];
+const FAMILY_CHIP: Record<Family, string> = { all: "All alerts", tariff: "Tariffs", tax: "Sales tax", safety: "Product safety", policy: "Policy", price: "Price changes" };
 
 export default function WatchlistPage() {
-  const router = useRouter();
-  const [url, setUrl] = useState("");
   const [busy, setBusy] = useState<"add" | "demo" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [verifyingNexus, setVerifyingNexus] = useState(false);
+
+  async function verifyNexus() {
+    setVerifyingNexus(true);
+    setError(null);
+    try {
+      const r = await api<{ verifications: NexusVerification[]; errors: string[] }>("/api/nexus/verify", { method: "POST", json: {} });
+      const ok = r.verifications.filter((v) => v.verified).length;
+      setNotice(`Read ${r.verifications.length} state revenue site${r.verifications.length === 1 ? "" : "s"} with Tavily; ${ok} threshold${ok === 1 ? "" : "s"} verified from the page text.${r.errors.length ? ` ${r.errors.join("; ")}` : ""}`);
+      nexusApi.refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setVerifyingNexus(false);
+    }
+  }
   const [notice, setNotice] = useState<string | null>(null);
   const [family, setFamily] = useState<Family>("all");
   const [allPulse, setAllPulse] = useState(false);
@@ -50,6 +67,7 @@ export default function WatchlistPage() {
   const account = useApi<{ account: AccountRow }>("/api/account");
   const health = useApi<Health>("/api/health");
   const forges = useApi<{ forges: ForgeRow[] }>("/api/forges");
+  const nexusApi = useApi<{ verifications: Record<string, NexusVerification> }>("/api/nexus");
   const forgeCount = forges.data?.forges.length ?? 0;
   const forgePassing = forges.data?.forges.filter((f) => f.status === "passed").length ?? 0;
 
@@ -68,9 +86,10 @@ export default function WatchlistPage() {
     tariff: openAlerts.filter((a) => a.family === "tariff").length,
     tax: openAlerts.filter((a) => a.family === "tax").length,
     safety: openAlerts.filter((a) => a.family === "safety").length,
-    policy: openAlerts.filter((a) => a.family === "policy").length,
+    policy: openAlerts.filter((a) => a.family === "policy" && a.kind !== "price").length,
+    price: openAlerts.filter((a) => a.kind === "price").length,
   };
-  const visible = family === "all" ? openAlerts : openAlerts.filter((a) => a.family === family);
+  const visible = family === "all" ? openAlerts : family === "price" ? openAlerts.filter((a) => a.kind === "price") : openAlerts.filter((a) => a.family === family && a.kind !== "price");
   const loading = products.loading || alerts.loading;
   const productCount = productList.length;
 
@@ -78,20 +97,6 @@ export default function WatchlistPage() {
     products.refresh();
     alerts.refresh();
     rules.refresh();
-  }
-
-  async function addListing() {
-    if (!url.trim()) return;
-    setBusy("add");
-    setError(null);
-    try {
-      const r = await api<{ product: ProductRow; existing: boolean }>("/api/products", { method: "POST", json: { url: url.trim() } });
-      router.push(`/products/${r.product.id}`);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(null);
-    }
   }
 
   async function loadDemo() {
@@ -109,21 +114,43 @@ export default function WatchlistPage() {
     }
   }
 
-  // Nexus limits: one row per ship-to state, read from that state's tax rule.
+  // Nexus limits: one row per ship-to state. The threshold is the latest
+  // verifier-backed value a tax check quoted from the revenue site, else the
+  // seed. Sales come from the orders import (dollars and orders per year) or
+  // the figures typed in Settings. Both tests are shown and the binding one named.
   const shipTo = settings?.ship_to_states ?? [];
+  const thisYear = String(new Date().getUTCFullYear());
+  const marketplaces = Array.from(new Set(productList.map((p) => p.marketplace)));
+  const facilitators = marketplaces.filter((m) => m === "amazon" || m === "etsy").map((m) => (m === "amazon" ? "Amazon" : "Etsy"));
+  const selfCollect = marketplaces.some((m) => m === "shopify" || m === "other");
   const nexus = shipTo.map((code) => {
-    const st = STATES.find((s) => s.code === code);
+    const seed = nexusSeed(code);
     const rule = ruleList
       .filter((r) => r.family === "tax" && r.state === code)
       .sort((a, b) => (b.last_run_at ?? "").localeCompare(a.last_run_at ?? ""))[0] ?? null;
-    const note = rule ? rule.seed_note : st?.threshold_note ?? null;
-    const threshold = thresholdAmount(note);
-    const salesRaw = settings?.state_sales?.[code];
-    const sales = typeof salesRaw === "number" && Number.isFinite(salesRaw) ? salesRaw : null;
-    const collector = rule?.seed_note?.match(/^(Amazon|Etsy) collects/)?.[1] ?? null;
-    const pct = sales != null && threshold ? (sales / threshold) * 100 : null;
-    const tone: Tone = pct == null ? "success" : pct >= 100 ? "critical" : pct >= 80 ? "warning" : "success";
-    return { code, name: st?.name ?? code, rule, threshold, sales, collector, pct, tone };
+    const ruleIds = new Set(ruleList.filter((r) => r.family === "tax" && r.state === code).map((r) => r.id));
+    const verifiedAlert = allAlerts
+      .filter((a) => a.family === "tax" && ruleIds.has(a.rule_id) && a.impact?.nexus_verified && a.impact.nexus && (a.impact.nexus.dollars != null || a.impact.nexus.transactions != null))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))[0] ?? null;
+    // Best source first: a threshold Tavily read on the revenue site itself, then a verifier-backed alert, then the seed.
+    const crawl = nexusApi.data?.verifications[code];
+    const crawled = crawl?.verified && crawl.parsed ? crawl : null;
+    const threshold = crawled?.parsed
+      ? { dollars: crawled.parsed.dollars, transactions: crawled.parsed.transactions, operator: crawled.parsed.operator }
+      : (verifiedAlert?.impact.nexus ?? (seed ? { dollars: seed.dollars, transactions: seed.transactions, operator: seed.operator } : { dollars: null, transactions: null, operator: null }));
+    const yearRow = settings?.state_sales_by_year?.[thisYear]?.[code];
+    const typed = settings?.state_sales?.[code];
+    const sales = yearRow?.dollars ?? (typeof typed === "number" && Number.isFinite(typed) ? typed : null);
+    const transactions = yearRow?.orders ?? null;
+    const progress = nexusProgress({ threshold, sales, transactions });
+    const verified = crawled
+      ? `verified ${fmtDate(crawled.checked_at) ?? ""} on ${crawled.sources[0]?.url ? new URL(crawled.sources[0].url).hostname.replace(/^www\./, "") : seed?.dor_domain ?? "the revenue site"} (Tavily ${crawled.method})${crawled.matches_seed ? "" : ", differs from the seed"}`
+      : verifiedAlert
+        ? `verified ${fmtDate(verifiedAlert.created_at) ?? ""} from ${sourceDomain(verifiedAlert) ?? seed?.dor_domain ?? "the revenue site"}`
+        : crawl && !crawl.verified
+          ? `seed value, revenue site checked ${fmtDate(crawl.checked_at) ?? ""} but no threshold parsed`
+          : "seed value, last verified never";
+    return { code, name: seed?.name ?? code, rule, seed, threshold, sales, transactions, progress, verified, alertId: verifiedAlert?.id ?? null, sourceUrl: crawled?.sources[0]?.url ?? null };
   });
 
   // Regulatory pulse: the official domains being watched, grouped.
@@ -143,6 +170,8 @@ export default function WatchlistPage() {
   }, [ruleList, openAlerts]);
   const lastRun = pulse.reduce<string | null>((m, p) => (p.last && (!m || p.last > m) ? p.last : m), null);
   const pulseShown = allPulse ? pulse : pulse.slice(0, 6);
+
+  if (products.error) return <PageError title="Watchlist" subtitle="What changed for the products you sell, checked against the official source." error={products.error ?? ""} status={products.status} onRetry={() => { products.refresh(); alerts.refresh(); rules.refresh(); account.refresh(); }} />;
 
   return (
     <div className="sr-page">
@@ -164,8 +193,12 @@ export default function WatchlistPage() {
         ) : null}
       </div>
 
-      {health.data && (!health.data.nemotron_configured || !health.data.storage_configured) ? (
-        <Banner tone="warning" title="Setup incomplete">
+      {health.data?.mode?.models === "canned" ? (
+        <Banner tone="info">
+          <p>Demo mode: no NEBIUS_API_KEY on this server, so Nemotron answers come from recorded fixtures and the store is a local file. Checks, guardrails, and pricing run for real; set the keys in apps/web/.env.local for live sources.</p>
+        </Banner>
+      ) : health.data && (!health.data.nemotron_configured || !health.data.storage_configured) ? (
+        <Banner tone="warning">
           <p>
             {!health.data.storage_configured ? "Storage is not configured (BLOB_READ_WRITE_TOKEN). " : ""}
             {!health.data.nemotron_configured ? "Nemotron on Nebius Token Factory is not configured (NEBIUS_API_KEY). Checks will fail until it is set." : ""}
@@ -199,27 +232,18 @@ export default function WatchlistPage() {
       </div>
 
       {productCount > 0 ? (
-        <SrCard className="sr-row sr-row--wrap" style={{ padding: 10, gap: 8 }}>
-          <div className="sr-grow" style={{ minWidth: 240 }}>
-            <TextField
-              label="Listing URL"
-              labelHidden
-              value={url}
-              onChange={setUrl}
-              autoComplete="off"
-              placeholder="Watch another listing: paste an Etsy, Shopify, or Amazon URL"
-              clearButton
-              onClearButtonClick={() => setUrl("")}
-              connectedRight={
-                <Button variant="primary" onClick={addListing} loading={busy === "add"} disabled={!url.trim() || busy === "demo"}>
-                  Watch
-                </Button>
-              }
-            />
-          </div>
-          <Button variant="plain" onClick={loadDemo} loading={busy === "demo"} disabled={busy === "add"}>
-            Load demo shop
-          </Button>
+        <SrCard style={{ padding: 10 }}>
+          <WatchForm
+            compact
+            placeholder="Watch another listing: paste an Etsy, Shopify, or Amazon URL"
+            buttonLabel="Watch"
+            disabled={busy === "demo"}
+            aside={
+              <Button variant="plain" onClick={loadDemo} loading={busy === "demo"}>
+                Load demo shop
+              </Button>
+            }
+          />
         </SrCard>
       ) : (
         <SrCard className="sr-stack">
@@ -229,24 +253,10 @@ export default function WatchlistPage() {
               Paste an Etsy, Shopify, or Amazon listing URL. Shop Rules reads the page, works out what the product is, and starts watching the duty, safety, tax, and policy rules that touch it.
             </p>
           </div>
-          <TextField
-            label="Listing URL"
-            labelHidden
-            value={url}
-            onChange={setUrl}
-            autoComplete="off"
-            placeholder="https://www.etsy.com/listing/..."
-            clearButton
-            onClearButtonClick={() => setUrl("")}
-            connectedRight={
-              <Button variant="primary" onClick={addListing} loading={busy === "add"} disabled={!url.trim() || busy === "demo"}>
-                Watch product
-              </Button>
-            }
-          />
+          <WatchForm placeholder="https://www.etsy.com/listing/..." buttonLabel="Watch product" disabled={busy === "demo"} />
           <div className="sr-row sr-row--between sr-row--wrap">
             <span className="sr-xs">Or add the page you are on with the Chrome extension.</span>
-            <Button variant="plain" onClick={loadDemo} loading={busy === "demo"} disabled={busy === "add"}>
+            <Button variant="plain" onClick={loadDemo} loading={busy === "demo"}>
               Load demo shop
             </Button>
           </div>
@@ -256,7 +266,7 @@ export default function WatchlistPage() {
       <ChipRow label="Filter alerts">
         {FAMILIES.map((f) => (
           <Chip key={f} active={family === f} count={counts[f]} onClick={() => setFamily(f)}>
-            {f === "all" ? "All alerts" : FAMILY_SHORT[f]}
+            {FAMILY_CHIP[f]}
           </Chip>
         ))}
       </ChipRow>
@@ -277,7 +287,7 @@ export default function WatchlistPage() {
               <SrButton href="/products">Open Inspector</SrButton>
             </EmptyCard>
           ) : (
-            <EmptyCard title={`No open ${FAMILY_SHORT[family].toLowerCase()} alerts`} text="Other alert types may still be waiting.">
+            <EmptyCard title={`No open ${FAMILY_CHIP[family].toLowerCase()}${family === "price" ? "" : " alerts"}`} text="Other alert types may still be waiting.">
               <SrButton onClick={() => setFamily("all")}>Show all alerts</SrButton>
             </EmptyCard>
           )
@@ -291,7 +301,19 @@ export default function WatchlistPage() {
       </section>
 
       <section className="sr-stack">
-        <SectionHead title="Nexus limits" aside="Sales tax thresholds by state" />
+        <SectionHead
+          title="Nexus limits"
+          aside={
+            <span className="sr-row" style={{ gap: 10 }}>
+              <span>{settings?.sales_import ? `Sales from your ${settings.sales_import.source === "shopify" ? "Shopify" : "Etsy"} orders export` : "Sales tax thresholds by state"}</span>
+              {shipTo.length ? (
+                <SrButton onClick={() => void verifyNexus()} loading={verifyingNexus} disabled={!account.data}>
+                  Verify on the revenue sites
+                </SrButton>
+              ) : null}
+            </span>
+          }
+        />
         {!account.data ? (
           <Skeleton lines={2} />
         ) : shipTo.length === 0 ? (
@@ -303,43 +325,79 @@ export default function WatchlistPage() {
             <div className="sr-grid-2">
               {nexus.map((n) => (
                 <ProgressRow
-                key={n.code}
-                label={`${n.name} nexus limit`}
-                tone={n.tone}
-                pct={n.pct}
-                value={
-                  n.sales != null ? (
+                  key={n.code}
+                  label={`${n.name} nexus limit`}
+                  tone={n.progress.tone}
+                  pct={n.progress.pct}
+                  value={
+                    n.threshold.dollars != null || n.threshold.transactions != null ? (
+                      <>
+                        {n.sales != null ? fmtShort(n.sales) : null}
+                        {n.sales != null ? <span className="sr-sm"> / </span> : null}
+                        {n.threshold.dollars != null ? fmtShort(n.threshold.dollars) : null}
+                        {n.threshold.dollars != null && n.threshold.transactions != null ? <span className="sr-sm"> {n.threshold.operator === "and" ? "and" : "or"} </span> : null}
+                        {n.threshold.transactions != null ? (
+                          <>
+                            {n.transactions != null ? `${n.transactions} / ` : ""}
+                            {n.threshold.transactions} orders
+                          </>
+                        ) : null}
+                      </>
+                    ) : (
+                      "No threshold on file"
+                    )
+                  }
+                  foot={
                     <>
-                      {fmtShort(n.sales)} <span className="sr-sm">/ {n.threshold ? fmtShort(n.threshold) : "live limit"}</span>
-                    </>
-                  ) : n.threshold ? (
-                    <>
-                      {fmtShort(n.threshold)} <span className="sr-sm">limit</span>
-                    </>
-                  ) : (
-                    "Verified live"
-                  )
-                }
-                foot={
-                  <>
-                    <span className="sr-truncate">{n.collector ? `${n.collector} collects for you here` : n.rule ? "You register once you cross the limit" : "Marketplace sellers are usually covered"}</span>
-                    {n.rule && n.threshold == null ? (
-                      <span>verified live</span>
-                    ) : n.sales == null ? (
-                      <NextLink href="/settings" className="sr-link">
-                        Set sales
-                      </NextLink>
-                    ) : n.pct != null ? (
-                      <span className={n.tone === "critical" ? "sr-tone-critical" : n.tone === "warning" ? "sr-tone-warning" : undefined} style={{ fontWeight: 600 }}>
-                        {n.pct >= 100 ? "Over the limit" : `${Math.round(n.pct)}% of limit`}
+                      <span className="sr-grow" style={{ minWidth: 180 }}>
+                        {facilitators.length ? `${facilitators.join(" and ")} collect for you here (marketplace facilitator)` : ""}
+                        {facilitators.length && selfCollect ? ". " : ""}
+                        {selfCollect || !facilitators.length ? (
+                          <>
+                            You collect:{" "}
+                            {n.seed ? (
+                              <a className="sr-link" href={n.seed.source_url} target="_blank" rel="noopener noreferrer">
+                                register at {n.seed.dor_domain}
+                              </a>
+                            ) : (
+                              "register with the state"
+                            )}
+                          </>
+                        ) : null}
                       </span>
-                    ) : null}
-                  </>
-                }
-              />
+                      {n.sales == null ? (
+                        <NextLink href="/settings" className="sr-link">
+                          Add sales
+                        </NextLink>
+                      ) : (
+                        <span className={n.progress.tone === "critical" ? "sr-tone-critical" : n.progress.tone === "warning" ? "sr-tone-warning" : undefined} style={{ fontWeight: 600 }}>
+                          {n.progress.summary}
+                        </span>
+                      )}
+                    </>
+                  }
+                />
               ))}
             </div>
-            <p className="sr-xs">Thresholds come from each state revenue site. Amazon and Etsy collect for you as marketplace facilitators; Shopify sellers register themselves.</p>
+            <div className="sr-row sr-row--wrap sr-xs" style={{ gap: "4px 12px" }}>
+              {nexus.map((n) => (
+                <span key={n.code} className="sr-num">
+                  {n.code}:{" "}
+                  {n.sourceUrl ? (
+                    <a href={n.sourceUrl} target="_blank" rel="noopener noreferrer" className="sr-link">
+                      {n.verified}
+                    </a>
+                  ) : n.alertId ? (
+                    <NextLink href={`/alerts/${n.alertId}`} className="sr-link">
+                      {n.verified}
+                    </NextLink>
+                  ) : (
+                    n.verified
+                  )}
+                </span>
+              ))}
+            </div>
+            <p className="sr-xs">Seed thresholds are labelled seeds until Tavily reads the state revenue site (Map finds the remote-seller pages, Extract reads them, a parser pulls the dollar and transaction tests with the quote). Amazon and Etsy collect for you as marketplace facilitators; sales from your own store count toward your own registration.</p>
           </SrCard>
         )}
       </section>

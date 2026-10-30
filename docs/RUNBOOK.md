@@ -54,7 +54,7 @@ workspace and the cookie. The public deployment keeps running; nothing else to r
 | "Load demo shop" takes more than a minute | wait once; then Terminal B, `scripts/rehearse.sh` | "Same pipeline on localhost; the public site is doing the same Tavily and Nemotron calls." |
 | an alert shows 0 backed | leave it; it is the verifier working | "The model proposed, the verifier found no quote, the alert says so." |
 | the forge card says "Not run" | read the label | "The sandbox needs the Token Factory project id; the code and tests are real, the run is not." |
-| `/api/health` says `store: none` or a Blob error | check `DATABASE_URL` on the deployment (D-12) | "The store moved to Postgres the night before the deadline; this is the fallback path." |
+| `/api/health` says `store: none` or a Blob error | check `DATABASE_URL` on the deployment (D-17) | "The store moved to Postgres the night before the deadline; this is the fallback path." |
 | Tavily 429 in keyless mode | add `TAVILY_API_KEY` | "Keyless Tavily is rate limited; the key is the fix." |
 
 ## 6. Sponsor paragraphs
