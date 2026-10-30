@@ -88,9 +88,12 @@ export function StandingInstructions({ skills, onChanged }: { skills: SkillRow[]
               </div>
             </div>
           ) : (
-            <p className="sr-body" style={{ color: "var(--sr-text)" }}>
-              {s.text}
-            </p>
+            <div className="sr-stack" style={{ gap: 2 }}>
+              <p className="sr-body" style={{ color: "var(--sr-text)" }}>
+                {s.text}
+              </p>
+              {s.rewrite && s.rewrite !== s.text ? <p className="sr-xs">In short: {s.rewrite}</p> : null}
+            </div>
           )}
         </div>
       ))}

@@ -9,6 +9,8 @@ export interface HtsHeading {
   heading: string;
   label: string;
   keywords: string[];
+  /** Title words that rule this heading out: "mug" is never a painting even when hand painted. */
+  negative?: string[];
 }
 
 export const HTS_CATALOG: HtsHeading[] = [
@@ -109,7 +111,7 @@ export const HTS_CATALOG: HtsHeading[] = [
   { heading: "8215", label: "Cutlery, spoons, forks, kitchen tools", keywords: ["cutlery", "spoon", "fork", "flatware", "utensils", "ladle", "spatula", "serving set", "tongs", "cheese knife", "butter knife"] },
   { heading: "8211", label: "Knives and blades", keywords: ["knife", "knives", "chef knife", "pocket knife", "kitchen knife", "blade", "cleaver", "paring knife"] },
   { heading: "8306", label: "Metal ornaments, frames, bells", keywords: ["metal sign", "wind chime", "metal wall art", "picture frame metal", "metal ornament", "bell", "statuette", "trophy", "metal decor", "tin sign"] },
-  { heading: "9701", label: "Paintings and original artwork", keywords: ["original painting", "painting", "oil painting", "acrylic painting", "watercolor original", "hand painted", "canvas art", "original art", "collage", "pastel drawing"] },
+  { heading: "9701", label: "Paintings and original artwork", keywords: ["original painting", "painting", "oil painting", "acrylic painting", "watercolor original", "canvas art", "original art", "collage", "pastel drawing", "wall art canvas"], negative: ["mug", "cup", "bowl", "plate", "vase", "planter", "ornament", "shirt", "tee", "tote", "pillow", "print", "poster", "card", "sticker", "sign", "rock", "stone", "furniture", "box", "tray"] },
   { heading: "4911", label: "Prints, posters, cards", keywords: ["print", "art print", "poster", "greeting card", "postcard", "sticker", "stickers", "decal", "wall art print", "giclee", "photo print", "calendar", "invitation", "trading card"] },
   { heading: "4901", label: "Books and booklets", keywords: ["book", "paperback", "hardcover", "ebook", "zine", "coloring book", "workbook", "cookbook", "guidebook"] },
   { heading: "4820", label: "Notebooks, journals, planners, stationery", keywords: ["notebook", "journal", "planner", "diary", "sketchbook", "notepad", "stationery", "binder", "sticky notes", "memo pad", "guest book", "address book"] },
@@ -182,7 +184,7 @@ export function keywordMatches(title: string | null | undefined, text: string | 
         hits.push(kw);
       }
     }
-    if (score > 0) out.push({ heading, score, hits });
+    if (score > 0 && !vetoedByTitle(heading, title)) out.push({ heading, score, hits });
   }
   return out.sort((a, b) => b.score - a.score).slice(0, limit);
 }
@@ -193,11 +195,21 @@ export interface HtsCandidate {
   confidence: number;
 }
 
+/** True when the title names something this heading can never be (its negative list). */
+export function vetoedByTitle(heading: HtsHeading, title: string | null | undefined): string | null {
+  if (!heading.negative?.length || !title) return null;
+  const t = normalize(title);
+  return heading.negative.find((w) => t.includes(` ${w.toLowerCase()} `)) ?? null;
+}
+
 /**
  * Turns the model's heading choice into stored candidates, enforcing the
- * catalog: an off-list heading falls back to the best keyword match at <= 0.5
- * confidence, and a heading with no keyword support while another heading has
- * strong support is capped at 0.5 with the keyword heading as an alternative.
+ * catalog. The keyword match never outranks a plausible model heading: an
+ * off-list heading falls back to the best keyword match at <= 0.5 confidence;
+ * a heading with no keyword support while another heading has strong support
+ * is capped at 0.5 and the keyword heading is kept beside it so the seller can
+ * pick (hts_guarded); only a heading the title itself rules out (a "mug" filed
+ * under paintings) is vetoed and the keyword heading moves first.
  */
 export function finalizeHts(
   model: { heading: string | null; alternatives: string[]; confidence: number },
@@ -222,8 +234,15 @@ export function finalizeHts(
     for (const m of kw.slice(1)) push(m.heading, Math.min(0.4, m.score / 10));
   } else {
     const support = kw.find((m) => m.heading.heading === chosen.heading);
-    const rival = kw[0] && kw[0].heading.heading !== chosen.heading && kw[0].score >= 4 ? kw[0] : null;
-    if (!support && rival) {
+    // A rival needs real evidence: a phrase or a title hit, not one generic word in the body.
+    const rival = kw.find((m) => m.heading.heading !== chosen.heading && m.score >= 4 && m.hits.some((h) => h.includes(" ") || normalize(title ?? "").includes(` ${h.toLowerCase()} `))) ?? null;
+    const veto = vetoedByTitle(chosen, title);
+    if (veto && rival) {
+      // The title names something this heading cannot be: the keyword heading leads, the model's stays visible.
+      guarded = true;
+      push(rival.heading, 0.6);
+      push(chosen, Math.min(conf, 0.4));
+    } else if (!support && rival) {
       guarded = true;
       push(chosen, Math.min(conf, 0.5));
       push(rival.heading, 0.5);

@@ -30,6 +30,9 @@ import { auditRuleCheck, historyContext } from "./sanity";
 import { effectiveProfile, effectivePrice, pricingProduct } from "./product";
 import { addExtract, addSearch, matchPassages, newTrail, setHash, setModel } from "./source-trail";
 import { fetchHtsRate } from "./hts-rate";
+import { comparePosition } from "./compare";
+import { skillRowFromDismissal } from "./skills";
+import { parseShopifyJson, shopifyJsonUrlFor, type ShopifyJsonProduct } from "./shopify-json";
 import { guardNexusParse } from "./nexus";
 import { catalogMenu, finalizeHts } from "./hts-catalog";
 import {
@@ -336,7 +339,11 @@ async function ingestProductInner(
   const meter = newMeter();
   // The extension can see Shopify stores on custom domains that the URL alone does not reveal.
   const hinted = page?.marketplace && ["etsy", "shopify", "amazon"].includes(page.marketplace) ? (page.marketplace as "etsy" | "shopify" | "amazon") : null;
-  const marketplace = hinted ?? marketplaceFromUrl(url);
+  let marketplace = hinted ?? marketplaceFromUrl(url);
+  // A /products/<handle> page on an unknown host: ask the store's own .json the way
+  // the extension does. An answer means Shopify on a custom domain, with exact fields.
+  const shopJson = marketplace === "other" && shopifyJsonUrlFor(url) ? await readShopifyJson(url) : null;
+  if (shopJson) marketplace = "shopify";
 
   let extracted = "";
   let extractTitle: string | null = null;
@@ -366,7 +373,11 @@ async function ingestProductInner(
   }
 
   const pageText = [
-    page?.title ? `Title: ${page.title}` : "",
+    page?.title ? `Title: ${page.title}` : shopJson?.title ? `Title: ${shopJson.title}` : "",
+    !page?.price && shopJson?.price != null ? `Price: ${shopJson.price}` : "",
+    !page?.description && shopJson?.description ? `Description: ${shopJson.description}` : "",
+    shopJson?.product_type ? `Product type: ${shopJson.product_type}` : "",
+    shopJson?.vendor ? `Vendor: ${shopJson.vendor}` : "",
     page?.price != null ? `Price: ${page.price} ${page.currency ?? ""}` : "",
     page?.materials?.length ? `Materials: ${page.materials.join(", ")}` : "",
     page?.description ? `Description: ${page.description}` : "",
@@ -415,9 +426,9 @@ async function ingestProductInner(
   // On Etsy and Amazon the page title is the listing title; on a Shopify store it
   // carries the shop name, so the classifier's name wins there.
   const siteTitle = marketplace === "amazon" || marketplace === "etsy" ? cleanTitle(extractTitle) : null;
-  const price = profile.price ?? page?.price ?? null;
+  const price = page?.price ?? shopJson?.price ?? profile.price ?? null;
   const currency = profile.currency ?? page?.currency ?? (price != null ? "USD" : null);
-  const imageUrl = page?.image ?? firstImage(extracted);
+  const imageUrl = page?.image ?? shopJson?.image ?? firstImage(extracted);
 
   await progress.step("seed", `${hts.candidates[0]?.code ? `HS ${hts.candidates[0].code}` : "classified"}`);
   // General duty rate for the heading, read from hts.usitc.gov with Tavily Extract. No model.
@@ -436,7 +447,7 @@ async function ingestProductInner(
       account_id: account.id,
       url,
       marketplace,
-      title: (cleanTitle(page?.title) ?? siteTitle ?? cleanTitle(profile.title) ?? cleanTitle(indexed?.title) ?? cleanTitle(extractTitle) ?? titleFromUrl(rawUrl) ?? "Untitled listing").slice(0, 200),
+      title: (cleanTitle(page?.title) ?? cleanTitle(shopJson?.title) ?? siteTitle ?? cleanTitle(profile.title) ?? cleanTitle(indexed?.title) ?? cleanTitle(extractTitle) ?? titleFromUrl(rawUrl) ?? "Untitled listing").slice(0, 200),
       price,
       currency,
       image_url: imageUrl,
@@ -470,9 +481,34 @@ function plain(text: string): string {
     .trim();
 }
 
+// First image in the page markdown that is not the store's logo, icon, badge, or an SVG.
 function firstImage(markdown: string): string | null {
-  const m = markdown.match(/!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/);
-  return m ? m[1] : null;
+  const re = /!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(markdown))) {
+    const alt = m[1].toLowerCase();
+    const src = m[2].toLowerCase();
+    if (/logo|icon|badge|payment|favicon|sprite|avatar|flag/.test(`${alt} ${src}`)) continue;
+    if (/\.svg(\?|$)/.test(src)) continue;
+    return m[2];
+  }
+  return null;
+}
+
+async function readShopifyJson(url: string): Promise<ShopifyJsonProduct | null> {
+  const jsonUrl = shopifyJsonUrlFor(url);
+  if (!jsonUrl) return null;
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 5000);
+  try {
+    const res = await fetch(jsonUrl, { headers: { accept: "application/json", "user-agent": "Mozilla/5.0 ShopRules/1.0" }, signal: ctl.signal, redirect: "follow" });
+    if (!res.ok || !/json/i.test(res.headers.get("content-type") ?? "")) return null;
+    return parseShopifyJson(await res.json());
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // 2. Run the watch rules for a product. Tavily Search on official domains, Tavily
@@ -679,7 +715,7 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
       max_results: 5,
       chunks_per_source: 3,
       include_domains: rule.include_domains,
-      include_domains_mode: rule.include_domains_mode,
+      include_domains_mode: rule.family === "tax" ? "strict" : rule.include_domains_mode,
       time_range: "year",
       topic: "general",
     },
@@ -738,7 +774,7 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
   const prompt = buildRuleCheckPrompt({
     product: view,
     rule,
-    skills: skills.map((s) => s.text),
+    skills: skills.map((s) => (s.rewrite && s.rewrite !== s.text ? `${s.text} (in short: ${s.rewrite})` : s.text)),
     history,
     sources: sources.map((s, i) => ({ url: s.url, title: sourceMeta[i].title, published_date: sourceMeta[i].published_date, text: s.text })),
     today,
@@ -815,7 +851,7 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
 
 // 3. Competitor prices for the extension's Compare card.
 
-export async function compareListings(account: AccountRow, input: { title: string; price?: number | null; marketplace?: string; url?: string }): Promise<CompetitorListings & { meter: Meter }> {
+export async function compareListings(account: AccountRow, input: { title: string; price?: number | null; marketplace?: string; url?: string }): Promise<CompetitorListings & { sample: number; median: number | null; meter: Meter }> {
   const meter = newMeter();
   const title = input.title.slice(0, 160);
   const search = await tavilySearch(
@@ -859,18 +895,9 @@ export async function compareListings(account: AccountRow, input: { title: strin
   });
   // The position is arithmetic, not a judgement: median competitor price against the seller's.
   const prices = parsed.listings.map((l) => l.price).filter((p): p is number => typeof p === "number" && Number.isFinite(p) && p > 0).sort((a, b) => a - b);
-  let position: CompetitorListings["price_position"] = "unknown";
-  let note = parsed.note;
-  if (prices.length && input.price != null && input.price > 0) {
-    const median = prices.length % 2 ? prices[(prices.length - 1) / 2] : (prices[prices.length / 2 - 1] + prices[prices.length / 2]) / 2;
-    const ratio = input.price / median;
-    position = ratio < 0.9 ? "below_market" : ratio > 1.1 ? "above_market" : "at_market";
-    const pct = Math.round(Math.abs(ratio - 1) * 100);
-    const where = position === "above_market" ? `${pct}% above` : position === "below_market" ? `${pct}% below` : "within 10% of";
-    note = `Your ${input.price.toFixed(2)} is ${where} the median of ${median.toFixed(2)} across ${prices.length} listing${prices.length === 1 ? "" : "s"} with a visible price.`;
-  }
+  const verdict = comparePosition(prices, input.price ?? null);
   await recordRun(account, null, "compare", meter);
-  return { ...parsed, note, price_position: position, meter };
+  return { ...parsed, note: verdict.note ?? parsed.note, price_position: verdict.position, sample: prices.length, median: verdict.median, meter };
 }
 
 // 4. A dismissal with a reason becomes a standing instruction for future checks.
@@ -894,7 +921,7 @@ export async function skillFromDismissal(account: AccountRow, alert: AlertRow, p
     meter,
   );
   await recordRun(account, product?.id ?? null, "skill", meter);
-  return insertSkill({ account_id: account.id, product_id: skill.scope === "product" ? alert.product_id : null, scope: skill.scope, text: skill.skill });
+  return insertSkill(skillRowFromDismissal(account.id, alert.product_id, reason, skill));
 }
 
 // 5. Telegram delivery, optional.

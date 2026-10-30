@@ -119,7 +119,7 @@ async function handle(message: BgRequest, sender: chrome.runtime.MessageSender):
     case "account":
       return api("/api/account");
     case "alertStatus":
-      return api(`/api/alerts/${encodeURIComponent(message.id)}`, post({ status: message.status, ...(message.reason ? { reason: message.reason } : {}) }, "PATCH"));
+      return api(`/api/alerts/${encodeURIComponent(message.id)}`, post({ status: message.status, ...(message.reason ? { reason: message.reason } : {}), ...(message.also_dismiss?.length ? { also_dismiss: message.also_dismiss } : {}) }, "PATCH"));
     case "settings":
       return getSettings();
     case "connect":
@@ -254,7 +254,20 @@ async function activeTabId(tab?: chrome.tabs.Tab): Promise<number | undefined> {
   return active?.id;
 }
 
-async function openPanelInTab(tabId: number): Promise<void> {
+// The seller pressed the shortcut and nothing could run in the page: say so
+// where they can see it, instead of silence. Clicking opens the popup's
+// "This site" card, which grants access and injects the panel.
+function notifyCannotRun(reason: string): void {
+  chrome.notifications.create("shop-rules-site-access", {
+    type: "basic",
+    iconUrl: chrome.runtime.getURL("icons/icon128.png"),
+    title: "Shop Rules cannot run on this page yet",
+    message: `${reason} Click the Shop Rules icon in the toolbar and use "Grant access to this site".`,
+    priority: 1,
+  });
+}
+
+async function openPanelInTab(tabId: number, url?: string): Promise<void> {
   const message: TabMessage = { type: "open-panel" };
   try {
     await chrome.tabs.sendMessage(tabId, message);
@@ -263,18 +276,34 @@ async function openPanelInTab(tabId: number): Promise<void> {
     // No content script yet. The command grants activeTab, so inject it now
     // (this is how custom-domain Shopify stores get the panel on demand).
   }
+  if (url && !/^https?:/.test(url)) {
+    notifyCannotRun("Chrome pages and the Web Store do not allow extensions.");
+    return;
+  }
   try {
     await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
     await chrome.tabs.sendMessage(tabId, message);
   } catch (err) {
     console.error("Shop Rules: could not open the panel in this tab", err);
+    notifyCannotRun("This store is on its own domain, so Chrome needs your permission once.");
+    try {
+      await chrome.action.openPopup();
+    } catch {
+      // Not every Chrome lets a command open the popup; the notification is the fallback.
+    }
   }
 }
 
 chrome.commands.onCommand.addListener((command, tab) => {
   if (command !== "open-panel") return;
   void activeTabId(tab).then((tabId) => {
-    if (tabId !== undefined) return openPanelInTab(tabId);
+    if (tabId !== undefined) return openPanelInTab(tabId, tab?.url);
     return undefined;
   });
+});
+
+chrome.notifications.onClicked.addListener((id) => {
+  if (id !== "shop-rules-site-access") return;
+  chrome.notifications.clear(id);
+  void chrome.action.openPopup().catch(() => undefined);
 });

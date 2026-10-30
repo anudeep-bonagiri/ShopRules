@@ -205,3 +205,26 @@ test("exclusion sentences do not make a product the subject", () => {
   assert.doesNotMatch(out, /toys/);
   assert.doesNotMatch(out, /6403/);
 });
+
+test("a nexus notice on Etsy is informational: low severity, review action, a note the seller can read", () => {
+  const check = {
+    relevance: "affects" as const,
+    headline: "Texas economic nexus threshold is 500,000 dollars",
+    claims: [{ claim: "Texas threshold is $500,000", quote: "a remote seller whose total Texas revenue exceeds $500,000 in the preceding twelve calendar months must obtain a permit", source_url: "https://comptroller.texas.gov/taxes/sales/remote-sellers.php" }],
+    impact: { severity: "medium" as const, effective_date: null, tariff_rate_change_pct: null, estimated_cost_change_pct: null, nexus: { dollars: 500000, transactions: null, operator: null } },
+    action: { type: "register_tax" as const, title: "Register for a Texas sales tax permit", steps: ["Register"], rationale: "Threshold" },
+  };
+  const verified = [{ ...check.claims[0], backed: true, matched_url: check.claims[0].source_url }];
+  const rule = { family: "tax" as const, title: "Texas economic nexus threshold", query: "Texas economic nexus threshold remote seller", state: "TX", include_domains: ["comptroller.texas.gov"], include_domains_mode: "strict" as const };
+  const product = { title: "Ceramic mug", marketplace: "etsy", profile: { category: "Home", product_type: "mug", keywords: ["mug"], materials: ["ceramic"], origin_country: "US", hts_candidates: [{ code: "6912", description: "Ceramic tableware" }] } };
+  const r = auditRuleCheck({ check, verified, rule, product, previous: [], today: "2026-10-30" });
+  assert.equal(r.drop, false);
+  assert.equal(r.check.impact.severity, "low");
+  assert.equal(r.check.relevance, "might_affect");
+  assert.equal(r.check.action.type, "review");
+  assert.ok(r.issues.some((i) => i.code === "facilitator_informational"));
+  // The same notice for a Shopify seller keeps its weight.
+  const shop = auditRuleCheck({ check: structuredClone(check), verified, rule, product: { ...product, marketplace: "shopify" }, previous: [], today: "2026-10-30" });
+  assert.equal(shop.check.impact.severity, "medium");
+  assert.equal(shop.check.action.type, "register_tax");
+});

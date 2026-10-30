@@ -30,6 +30,26 @@ export default function AlertPage() {
   const settings = account.data?.account.settings;
   const [dismissOpen, setDismissOpen] = useState(false);
   const [reason, setReason] = useState("");
+  const [similar, setSimilar] = useState<Array<{ id: string; headline: string; product_title: string | null }>>([]);
+  const [dismissingSimilar, setDismissingSimilar] = useState(false);
+
+  // The same reason usually covers the siblings (every open nexus state, the same
+  // notice on another product). Offered after the dismissal, never applied silently.
+  async function dismissSimilar() {
+    if (!similar.length) return;
+    setDismissingSimilar(true);
+    setActionError(null);
+    try {
+      const r = await api<{ also_dismissed: number }>(`/api/alerts/${id}`, { method: "PATCH", json: { status: "dismissed", also_dismiss: similar.map((s) => s.id) } });
+      setNotice(`Dismissed ${r.also_dismissed} similar alert${r.also_dismissed === 1 ? "" : "s"} with the same reason.`);
+      setSimilar([]);
+      refresh();
+    } catch (e) {
+      setActionError((e as Error).message);
+    } finally {
+      setDismissingSimilar(false);
+    }
+  }
   const [busy, setBusy] = useState<"done" | "dismiss" | "reopen" | "draft" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -38,9 +58,10 @@ export default function AlertPage() {
     setBusy(kind);
     setActionError(null);
     try {
-      const r = await api<{ alert: AlertRow; skill: SkillRow | null }>(`/api/alerts/${id}`, { method: "PATCH", json: { status, reason } });
+      const r = await api<{ alert: AlertRow; skill: SkillRow | null; similar?: Array<{ id: string; headline: string; product_title: string | null }> }>(`/api/alerts/${id}`, { method: "PATCH", json: { status, reason } });
       setDismissOpen(false);
       setReason("");
+      setSimilar(status === "dismissed" ? (r.similar ?? []) : []);
       setNotice(
         message ??
           (status === "dismissed"
@@ -111,6 +132,17 @@ export default function AlertPage() {
       {notice ? (
         <Banner tone="success" onDismiss={() => setNotice(null)}>
           <p>{notice}</p>
+          {similar.length ? (
+            <div className="sr-row sr-row--wrap" style={{ gap: 8, marginTop: 6 }}>
+              <span className="sr-sm">
+                {similar.length} similar open alert{similar.length === 1 ? "" : "s"}: {similar.slice(0, 3).map((x) => x.product_title ? `${x.product_title}, ${x.headline}` : x.headline).join("; ")}
+                {similar.length > 3 ? "; and more" : ""}
+              </span>
+              <SrButton onClick={() => void dismissSimilar()} loading={dismissingSimilar}>
+                {`Also dismiss ${similar.length} similar`}
+              </SrButton>
+            </div>
+          ) : null}
         </Banner>
       ) : null}
       {actionError ? (

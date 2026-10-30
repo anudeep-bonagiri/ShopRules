@@ -112,6 +112,49 @@ test("Etsy listing: JSON-LD wins, cards on the same page resolve to their own li
   await page.close();
 });
 
+test("Etsy search card: the overlay button is not the title, the inner listing block grows to the whole card, the sale price wins", async () => {
+  const page = await openFixture("etsy.html", "https://www.etsy.com/search?q=ceramic+mug");
+  const r = (await page.evaluate(() => {
+    const sr = window.__sr as Record<string, (...a: unknown[]) => unknown>;
+    const m = sr.detectMarketplace!() as string;
+    const button = document.querySelector(".listing-card-overlay button");
+    const fromButton = sr.findProductCardElement!(button, m) as Element | null;
+    const img = document.querySelector('img[alt="Hand painted ceramic mug"]');
+    const fromImage = sr.findProductCardElement!(img, m) as Element | null;
+    const card = fromImage ? sr.productFromCard!(fromImage, m) : null;
+    return { same: fromButton === fromImage, card };
+  })) as { same: boolean; card: { url: string; title: string | null; price: number | null; currency: string | null } | null };
+  assert.equal(r.same, true);
+  assert.equal(r.card?.url, "https://www.etsy.com/listing/444/hand-painted-ceramic-mug");
+  assert.equal(r.card?.title, "Hand Painted Ceramic Mug, Stoneware Coffee Cup");
+  assert.equal(r.card?.price, 35);
+  assert.equal(r.card?.currency, "USD");
+  await page.close();
+});
+
+test("Amazon search results: a sponsored card resolves by its ASIN even with click-through and color links inside", async () => {
+  const page = await openFixture("amazon-search.html", "https://www.amazon.com/s?k=led+desk+lamp");
+  const r = (await page.evaluate(() => {
+    const sr = window.__sr as Record<string, (...a: unknown[]) => unknown>;
+    const m = sr.detectMarketplace!() as string;
+    const isProduct = sr.isProductPage!(m) as boolean;
+    const span = document.querySelector('[data-asin="B0CXK7L9QZ"] .a-text-normal');
+    const cardEl = sr.findProductCardElement!(span, m) as Element | null;
+    const card = cardEl ? sr.productFromCard!(cardEl, m) : null;
+    const second = sr.findProductCardElement!(document.querySelector('[data-asin="B07XYZ123A"] img'), m) as Element | null;
+    const sponsoredUrl = sr.canonicalProductUrl!("https://www.amazon.com/sspa/click?ie=UTF8&spc=abc&url=%2FLumenex%2Fdp%2FB0CXK7L9QZ%2Fref%3Dsr_1_1_sspa", m) as string | null;
+    return { m, isProduct, card, secondUrl: second ? (sr.productFromCard!(second, m) as { url: string } | null)?.url : null, sponsoredUrl };
+  })) as { m: string; isProduct: boolean; card: { url: string; title: string | null; price: number | null } | null; secondUrl: string | null; sponsoredUrl: string | null };
+  assert.equal(r.m, "amazon");
+  assert.equal(r.isProduct, false);
+  assert.equal(r.card?.url, "https://www.amazon.com/dp/B0CXK7L9QZ");
+  assert.match(r.card?.title ?? "", /Lumenex USB-C Rechargeable LED Desk Lamp/);
+  assert.equal(r.card?.price, 29.99);
+  assert.equal(r.secondUrl, "https://www.amazon.com/dp/B07XYZ123A");
+  assert.equal(r.sponsoredUrl, "https://www.amazon.com/dp/B0CXK7L9QZ");
+  await page.close();
+});
+
 test("myshopify store: Open Graph price and the Dawn selectors agree", async () => {
   const page = await openFixture("shopify.html", "https://sunday-studio-goods.myshopify.com/products/organic-cotton-oversized-tee");
   const r = (await page.evaluate(() => {

@@ -92,9 +92,11 @@ export function buildRules(profile: ProductProfile, marketplace: Marketplace, sh
   const type = profile.product_type || profile.category;
   const rules: RuleSpec[] = [];
 
-  // Tariffs and duties. Always watched: every product on a marketplace is either
-  // imported or competes with imports, and the rate changed often this year.
-  rules.push({
+  // Tariffs and duties. Watched for every imported product; a product made in
+  // the United States pays no import duty, so no tariff rule is seeded for it
+  // (the product page says so in its duty exposure card).
+  const domestic = profile.origin_country?.toUpperCase() === "US";
+  if (!domestic) rules.push({
     family: "tariff",
     key: "tariff-origin",
     title: profile.origin_country ? `Tariffs on ${type} from ${origin}` : `Tariffs on ${type} from unknown origin, set it to sharpen tariff checks`,
@@ -118,7 +120,7 @@ export function buildRules(profile: ProductProfile, marketplace: Marketplace, sh
       seed_note: null,
     });
   }
-  rules.push({
+  if (!domestic) rules.push({
     family: "tariff",
     key: "tariff-deminimis",
     title: "De minimis treatment of low-value imports",
@@ -130,7 +132,7 @@ export function buildRules(profile: ProductProfile, marketplace: Marketplace, sh
     seed_note: null,
   });
   const hts = profile.hts_candidates[0];
-  if (hts?.code) {
+  if (hts?.code && !domestic) {
     rules.push({
       family: "tariff",
       key: "tariff-hts",
@@ -244,8 +246,9 @@ export function buildRules(profile: ProductProfile, marketplace: Marketplace, sh
       key: `tax-${st.code}`,
       title: `${st.name} economic nexus threshold`,
       query: `${st.name} economic nexus threshold remote seller marketplace facilitator sales tax ${year}`,
+      // Strict: a threshold is only ever quoted from the state revenue site, never from a tax consultancy.
       include_domains: [st.dor_domain],
-      include_domains_mode: "prefer",
+      include_domains_mode: "strict",
       cadence_hours: 72,
       state: st.code,
       seed_note: facilitatorCovered

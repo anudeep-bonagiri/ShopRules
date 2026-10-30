@@ -143,7 +143,10 @@ export interface SkillRow {
   account_id: string;
   product_id: string | null;
   scope: string;
+  /** The instruction future checks follow: the seller's own words. */
   text: string;
+  /** Nemotron Nano's generalised one-liner, when it was long enough to mean something. Shown as a sub-line. */
+  rewrite?: string | null;
   created_at: string;
 }
 

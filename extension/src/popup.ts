@@ -269,6 +269,19 @@ async function injectPanel(site: SiteTarget): Promise<void> {
   else await chrome.scripting.registerContentScripts([script]);
 }
 
+// Chrome drops a suggested key when another extension already owns it; the
+// seller then presses Alt+Shift+S and nothing happens. Say what is bound.
+async function shortcutLabel(): Promise<string> {
+  try {
+    const commands = await chrome.commands.getAll();
+    const open = commands.find((c) => c.name === "open-panel");
+    if (!open) return "";
+    return open.shortcut ? ` Shortcut: ${open.shortcut}.` : " The Alt+Shift+S shortcut is not bound in this Chrome; set it at chrome://extensions/shortcuts, or use the floating button on product pages.";
+  } catch {
+    return "";
+  }
+}
+
 async function setupSiteCard(site: SiteTarget | null): Promise<void> {
   if (!site) {
     siteLine.textContent = "Open a store page to grant access.";
@@ -279,7 +292,10 @@ async function setupSiteCard(site: SiteTarget | null): Promise<void> {
     return;
   }
   const granted = await chrome.permissions.contains({ origins: [site.pattern] });
-  siteLine.textContent = granted ? `${site.hostname} has access. Use this to inject the panel without reloading.` : `Grant access so the panel works on ${site.hostname} (for Shopify stores on their own domain).`;
+  const shortcut = await shortcutLabel();
+  siteLine.textContent = granted
+    ? `${site.hostname} has access. Use this to inject the panel without reloading.${shortcut}`
+    : `Grant access so the panel works on ${site.hostname} (for Shopify stores on their own domain). Until then the shortcut does nothing here.${shortcut}`;
   grantButton.textContent = granted ? "Inject panel on this page" : "Grant access to this site";
   grantButton.disabled = false;
   grantButton.addEventListener("click", () => {

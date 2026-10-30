@@ -16,6 +16,13 @@ const KNOWN_CARDS =
   ".v2-listing-card, .listing-link, .product-card, .card-wrapper, .grid__item, article, li";
 const MAX_DESCRIPTION = 2000;
 const MAX_WALK = 14;
+// Amazon search results carry the ASIN on the card itself; no link counting needed.
+const AMAZON_CARD = '[data-component-type="s-search-result"][data-asin], .s-result-item[data-asin], [data-asin][data-index]';
+// Card title candidates, most specific first. Overlay buttons ("Preview seller",
+// "Add to cart") and shop links are never titles.
+const CARD_TITLE_SELECTORS = ["[data-listing-card-title]", ".v2-listing-card__title", "h3", "h2", "h4", '[class*="title"]', '[class*="name"]'];
+const NOT_TITLE_WITHIN = 'button, [role="button"], a[href*="/shop/"], [aria-hidden="true"], .wt-screen-reader-only, [class*="screen-reader"], [class*="sr-only"]';
+const JUNK_TITLE = /^(preview seller|add to cart|add to basket|add to favou?rites?|favou?rite|remove from favou?rites?|sponsored|ad by .{0,60}|ad from .{0,60}|quick view|see more|see options|more like this|shop now|buy now|etsy'?s pick|bestseller|best seller|popular now|free shipping.{0,40}|sale|new|options|\d+ reviews?)$/i;
 
 // Marketplace and page detection
 
@@ -63,7 +70,19 @@ export function canonicalProductUrl(href: string, market: Marketplace): string |
     return null;
   }
   if (market === "amazon") {
-    const m = url.pathname.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i);
+    let path = url.pathname;
+    // Sponsored results link through /sspa/click?...&url=%2FName%2Fdp%2FASIN%2F...
+    if (/\/sspa\/click/.test(path)) {
+      const inner = url.searchParams.get("url");
+      if (inner) {
+        try {
+          path = new URL(inner, url.origin).pathname;
+        } catch {
+          path = inner;
+        }
+      }
+    }
+    const m = path.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i);
     return m?.[1] ? `${url.origin}/dp/${m[1].toUpperCase()}` : null;
   }
   if (market === "etsy") {
@@ -381,13 +400,26 @@ export function nearestProductCard(start: Element | null, market: Marketplace): 
 // The smallest card-sized ancestor of `start` that holds exactly one product link.
 export function findProductCardElement(start: Element | null, market: Marketplace): Element | null {
   if (!start) return null;
+  if (market === "amazon") {
+    const amazon = start.closest(AMAZON_CARD);
+    if (amazon && cardAsin(amazon)) return amazon;
+  }
   const known = start.closest(KNOWN_CARDS);
-  if (known && isSingleProductCard(known, market)) return known;
+  // A known wrapper can be an inner part of the card (Etsy puts data-listing-id
+  // on the link block); grow to the outermost element that is still one product
+  // so the price and title below the image are inside.
+  if (known && isSingleProductCard(known, market)) return growToCard(known, market) ?? known;
   return walkToCard(start, market);
 }
 
+function cardAsin(card: Element): string | null {
+  const asin = card.getAttribute("data-asin")?.trim().toUpperCase() ?? "";
+  return /^[A-Z0-9]{10}$/.test(asin) ? asin : null;
+}
+
 export function productFromCard(card: Element, market: Marketplace): CardProduct | null {
-  const url = productUrlsWithin(card, market, 2)[0];
+  const asin = market === "amazon" ? cardAsin(card) : null;
+  const url = asin ? `${location.origin}/dp/${asin}` : productUrlsWithin(card, market, 2)[0];
   if (!url) return null;
   const priceText = cardPriceText(card);
   return {
@@ -423,7 +455,7 @@ function growToCard(anchor: Element, market: Marketplace): Element | null {
 }
 
 function isSingleProductCard(el: Element, market: Marketplace): boolean {
-  if (productUrlsWithin(el, market, 2).length !== 1) return false;
+  if (!(market === "amazon" && cardAsin(el)) && productUrlsWithin(el, market, 2).length !== 1) return false;
   const rect = el.getBoundingClientRect();
   const viewportArea = window.innerWidth * window.innerHeight;
   return rect.width > 40 && rect.height > 40 && rect.width * rect.height < viewportArea * 0.4 && rect.height < window.innerHeight * 0.8;
@@ -442,9 +474,22 @@ function productUrlsWithin(el: Element, market: Marketplace, limit: number): str
   return urls;
 }
 
+// Text of an element with its buttons and screen-reader-only spans removed.
+function textExcluding(el: Element, excludeSelector: string): string | null {
+  const copy = el.cloneNode(true) as Element;
+  for (const junk of Array.from(copy.querySelectorAll(excludeSelector))) junk.remove();
+  return clean(copy.textContent);
+}
+
 function cardTitle(card: Element): string | null {
-  const heading = firstText(card, ["h2", "h3", "h4", '[class*="title"]', '[class*="name"]']);
-  if (heading) return heading.slice(0, 200);
+  for (const selector of CARD_TITLE_SELECTORS) {
+    for (const el of Array.from(card.querySelectorAll(selector)).slice(0, 8)) {
+      if (el.closest(NOT_TITLE_WITHIN)) continue;
+      const t = textExcluding(el, NOT_TITLE_WITHIN);
+      if (!t || t.length < 3 || JUNK_TITLE.test(t)) continue;
+      return t.slice(0, 200);
+    }
+  }
   const img = card.querySelector<HTMLImageElement>("img[alt]");
   const alt = clean(img?.alt);
   if (alt) return alt.replace(/^sponsored ad\s*-\s*/i, "").slice(0, 200);
@@ -453,9 +498,10 @@ function cardTitle(card: Element): string | null {
 }
 
 function cardPriceText(card: Element): string | null {
-  const etsyValue = card.querySelector(".currency-value");
+  // Etsy: the current price, not the struck-through original on a sale card.
+  const etsyValue = Array.from(card.querySelectorAll(".currency-value")).find((v) => !v.closest("s, del, .wt-text-strikethrough, [class*='strikethrough'], [class*='original-price']")) ?? card.querySelector(".currency-value");
   if (etsyValue) {
-    const symbol = clean(card.querySelector(".currency-symbol")?.textContent) ?? "";
+    const symbol = clean((etsyValue.parentElement?.querySelector(".currency-symbol") ?? card.querySelector(".currency-symbol"))?.textContent) ?? "";
     return `${symbol}${clean(etsyValue.textContent) ?? ""}`;
   }
   const direct = firstText(card, [

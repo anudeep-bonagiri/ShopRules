@@ -23,7 +23,8 @@ export interface GuardrailIssue {
     | "duplicate_of_previous"
     | "severity_adjusted"
     | "rate_corrected_from_levels"
-    | "no_backed_claims";
+    | "no_backed_claims"
+    | "facilitator_informational";
   severity: GuardrailSeverity;
   message: string;
 }
@@ -360,6 +361,17 @@ export function auditRuleCheck(input: AuditInput): AuditResult {
   if (check.relevance === "might_affect" && check.impact.severity === "high") {
     issues.push({ code: "severity_adjusted", severity: "adjust", message: "An unconfirmed match cannot be high severity; lowered to medium." });
     check.impact.severity = "medium";
+  }
+
+  // 8. Sales tax on a facilitator marketplace: Amazon and Etsy collect and remit
+  // in every nexus state, so a threshold notice is information, not a task.
+  const facilitator = rule.family === "tax" && (input.product.marketplace === "amazon" || input.product.marketplace === "etsy");
+  if (facilitator) {
+    const name = input.product.marketplace === "amazon" ? "Amazon" : "Etsy";
+    if (check.impact.severity !== "low") check.impact.severity = "low";
+    if (check.relevance === "affects") check.relevance = "might_affect";
+    if (check.action.type === "register_tax") check.action = { ...check.action, type: "review", title: `For information: ${name} collects sales tax here as a marketplace facilitator` };
+    issues.push({ code: "facilitator_informational", severity: "note", message: `${name} collects and remits sales tax in this state as a marketplace facilitator, so this notice is informational and was set to low severity. It matters only for sales outside ${name}.` });
   }
 
   return { drop: false, dropReason: null, check, verified, issues };
