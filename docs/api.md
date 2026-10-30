@@ -12,7 +12,7 @@ API clients send the token in a header:
 X-SR-Token: sr_live_...
 ```
 
-The browser app uses the cookie; the extension uses the header. Both resolve to the same account. CORS is open for `/api/*` so the extension can call it from any origin.
+The browser app uses the cookie; the extension uses the header. Both resolve to the same account. Every `/api/*` response carries CORS headers (the extension's origin is reflected; other origins get `*`), not only the preflight, so the extension works against any backend URL. A wrong token returns 401 `{ error }`; the popup shows "Token rejected" and the panel offers to reconnect.
 
 ## Endpoints
 
@@ -29,8 +29,8 @@ Body: partial `{ settings, telegram_chat_id }`. Returns the updated account.
 Cheap lookup used by the extension on hover. Returns `{ watched: boolean, product: Product | null, marketplace: string, families_preview: string[] }`. Does not call Tavily or Nemotron.
 
 ### `POST /api/products`
-Body: `{ url: string, page?: { title?, price?, currency?, description?, materials?, image?: string } }`.
-The server runs Tavily Extract on the URL, merges any `page` fields the extension scraped from the DOM, classifies the product with Nemotron Nano, and seeds the watch rules. Returns `{ product, rules, meter }`. If the listing already exists for this account the existing product is returned with `existing: true`.
+Body: `{ url: string, page?: { title?, price?, currency?, description?, materials?: string[] | string, image?: string, marketplace?: "etsy" | "shopify" | "amazon" }, run_id?: string }`.
+The server runs Tavily Extract on the URL, merges any `page` fields the extension scraped from the DOM, classifies the product with Nemotron Nano (tariff heading from the curated catalog), and seeds the watch rules. Returns `{ product, rules, meter }` (201). If the listing already exists for this account the existing product is returned with `existing: true` (200). Pass a client-chosen `run_id` (8 to 64 url-safe characters) and poll `GET /api/runs/:run_id` every 2 s to show the three steps (Reading listing, Classifying, Seeding rules) while the request is in flight. Failures are 422 with the reason (reader blocked, not a product page) or 429 (25-product cap).
 
 ### `GET /api/products`
 Returns `{ products: Product[] }` with the newest first. Each product includes `open_alerts` (count) and `last_checked_at`.
@@ -38,11 +38,17 @@ Returns `{ products: Product[] }` with the newest first. Each product includes `
 ### `GET /api/products/:id`
 Returns `{ product, rules, alerts, price_history, skills }`.
 
+### `PATCH /api/products/:id`
+Seller-set fields that win over the classifier and the workspace defaults. Body: any of `{ price_override, unit_cost, dutiable_share (0..1), units_per_week, origin_country (ISO-2), hts_heading (four-digit heading from the catalog), hts_detail ("9405.20.60"), for_children, materials: string[] }`. Send `null` to clear a field. Returns `{ product }`; `product.overrides` holds the set fields. 400 lists validation errors.
+
 ### `DELETE /api/products/:id`
 Stops watching. Returns `{ ok: true }`.
 
 ### `POST /api/products/:id/check`
-Runs every due rule for the product now (set `{ force: true }` to ignore cadence). For each rule: Tavily Search on official domains, Tavily Extract on the top pages, Nemotron Ultra decides whether the change touches the product and drafts the action, the verifier drops any claim whose quote is not in the extracted text. Returns `{ alerts: Alert[], checked: number, meter }`.
+Body: `{ scope?: "due" | "all" | "tariff" | "safety" | "tax" | "policy", run_id?: string, force?: boolean, max_rules?: number }`. Default scope `due` runs every rule whose cadence elapsed (up to 12, three at a time). For each rule: Tavily Search on official domains, Tavily Extract on the top pages, Nemotron Ultra decides whether the change touches the product (facts only, no price), the verifier drops any claim whose quote is not in the extracted text, and the deterministic guardrails (`docs/GUARDRAILS.md`) audit the verdict. Unchanged sources (same content hash) skip the model. `force` skips that dedupe and costs money; leave it off. The request blocks until the run finishes; pass a `run_id` and poll `GET /api/runs/:run_id` for live progress. Returns `{ alerts: Alert[], checked: number, skipped_unchanged: number, errors: string[], meter, run_id }`.
+
+### `GET /api/runs/:id`
+Live progress of a check or ingest run: `{ run: { id, kind: "check" | "ingest", status: "running" | "done" | "failed", total, done, current: string[] (domains being read), items: [{ rule_id, title, family, domain, status: "queued" | "checking" | "clear" | "unchanged" | "alert" | "error", alert_id? }], steps?: [{ key: "read" | "classify" | "seed", label, status, detail? }], error?, started_at, finished_at } }`. 404 until the run has written its first record.
 
 ### `GET /api/alerts?status=new|dismissed|actioned|all`
 Returns `{ alerts: Alert[] }` newest first, each with `product_title`, `family`, `rule_title`.
@@ -83,7 +89,8 @@ Loads three sample listings for the current account and runs one check. Returns 
 type Product = {
   id: string; account_id: string; url: string; marketplace: "etsy" | "shopify" | "amazon" | "other";
   title: string; price: number | null; currency: string | null; image_url: string | null;
-  profile: ProductProfile; // see apps/web/src/lib/schemas.ts
+  profile: ProductProfile; // see apps/web/src/lib/schemas.ts; hts_candidates[0].code is a four-digit catalog heading, hts_detail a suggested refinement
+  overrides?: { price_override?, unit_cost?, dutiable_share?, units_per_week?, origin_country?, hts_heading?, hts_detail?, for_children?, materials? } | null; // seller-set, see PATCH
   created_at: string; last_checked_at: string | null; open_alerts?: number;
 };
 
@@ -101,8 +108,17 @@ type Alert = {
   proposed: number; backed: number; rejected: number;
   impact: { severity; effective_date: string | null; tariff_rate_change_pct: number | null; estimated_cost_change_pct: number | null };
   action: { type: "reprice" | "compliance_step" | "register_tax" | "review" | "none"; title: string; steps: string[]; suggested_price: number | null; rationale: string };
+  pricing: PricingResult | null; // deterministic reprice math, see apps/web/src/lib/pricing.ts
+  guardrails?: Array<{ code: string; severity: "drop" | "adjust" | "note"; message: string }>; // see docs/GUARDRAILS.md
   sources: Array<{ url: string; title: string; domain: string }>;
   created_at: string;
+};
+
+type PricingResult = {
+  old_cost: number; new_cost: number; cost_delta: number;
+  old_margin_pct: number; new_margin_pct_if_unchanged: number; weekly_drag: number;
+  strategy: "hold_margin" | "hold_target" | "absorb"; suggested_price: number | null; suggested_delta: number | null;
+  margin_at_suggested_pct: number; basis: "duty" | "cost" | "none"; explanation: string;
 };
 
 type Forge = {
