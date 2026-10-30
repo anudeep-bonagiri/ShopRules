@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Shop Rules</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="header">
+      <img class="logo" src="icons/icon32.png" width="24" height="24" alt="" />
+      <span class="brand">Shop Rules</span>
+      <span id="status" class="badge badge--neutral">Not connected</span>
+    </header>
+
+    <main>
+      <section class="card">
+        <h2>Account</h2>
+        <label class="field">
+          <span>Shop Rules URL</span>
+          <input id="base-url" type="url" placeholder="https://shop-rules.vercel.app" spellcheck="false" />
+        </label>
+        <label class="field">
+          <span>Account token</span>
+          <input id="token" type="password" placeholder="sr_live_..." autocomplete="off" spellcheck="false" />
+        </label>
+        <p class="hint">Copy the token from the Settings page of the web app.</p>
+        <div class="row">
+          <button id="save" class="btn btn--primary" type="button">Save</button>
+          <button id="test" class="btn" type="button">Test connection</button>
+        </div>
+        <p id="test-result" class="result" hidden></p>
+      </section>
+
+      <section class="card">
+        <h2>Open alerts</h2>
+        <p id="alerts-line" class="muted">Loading...</p>
+        <a id="alerts-link" class="btn btn--block" href="#" target="_blank" rel="noopener">View alerts</a>
+      </section>
+
+      <section class="card">
+        <h2>This site</h2>
+        <p id="site-line" class="muted">Checking the current tab...</p>
+        <button id="grant" class="btn btn--block" type="button" disabled>Grant access to this site</button>
+        <p id="grant-result" class="result" hidden></p>
+      </section>
+
+      <section class="card">
+        <h2>How to use</h2>
+        <ol class="steps">
+          <li>Open a product on Amazon, Etsy, or your Shopify store.</li>
+          <li>Hover a product and press <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>, or click the green button in the corner.</li>
+          <li>Click Watch this product to seed its rules and get alerts.</li>
+        </ol>
+      </section>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

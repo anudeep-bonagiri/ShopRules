@@ -1,4 +1,4 @@
-import { dbConfigured } from "@/lib/db";
+import { dbConfigured, storeName } from "@/lib/db";
 import { nemotronConfigured, MODELS } from "@/lib/nemotron";
 import { tavilyMode } from "@/lib/tavily";
 import { json } from "@/lib/account";
@@ -12,6 +12,7 @@ export async function GET() {
     tavily_mode: tavilyMode(),
     nemotron_configured: nemotronConfigured(),
     storage_configured: dbConfigured(),
+    store: storeName(),
     models: MODELS,
   });
 }

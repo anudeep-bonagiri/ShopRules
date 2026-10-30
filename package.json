@@ -1,7 +1,15 @@
 {
   "name": "shop-rules",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anudeep-bonagiri/ShopRules.git"
+  },
+  "homepage": "https://shop-rules.vercel.app",
   "private": true,
-  "workspaces": ["apps/web", "extension"],
+  "workspaces": [
+    "apps/web",
+    "extension"
+  ],
   "scripts": {
     "dev": "npm run dev -w apps/web",
     "build": "npm run build -w apps/web && npm run build -w extension",

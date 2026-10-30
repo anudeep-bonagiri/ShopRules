@@ -1,5 +1,32 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 28 28" fill="none">
-  <rect x="0" y="0" width="28" height="28" rx="7" fill="#008060"/>
-  <path d="M14 5.5l7 2.7v5.3c0 4.4-3 8.4-7 9.5-4-1.1-7-5.1-7-9.5V8.2l7-2.7z" fill="#ffffff" opacity="0.95"/>
-  <path d="M10.6 14.2l2.3 2.3 4.6-4.8" stroke="#008060" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+<defs>
+    <linearGradient id="shopBagGrad" x1="18%" y1="0%" x2="82%" y2="100%">
+      <stop offset="0%" stop-color="#95BF47" />
+      <stop offset="28%" stop-color="#5E8E3E" />
+      <stop offset="100%" stop-color="#004C3F" />
+    </linearGradient>
+    <linearGradient id="foldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#008060" />
+      <stop offset="100%" stop-color="#002E25" />
+    </linearGradient>
+    <linearGradient id="handleGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#BEE574" />
+      <stop offset="100%" stop-color="#678E34" />
+    </linearGradient>
+    <filter id="softGlow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="16" stdDeviation="20" flood-color="#004C3F" flood-opacity="0.25" />
+    </filter>
+  </defs>
+  <rect width="512" height="512" fill="none" />
+  <g filter="url(#softGlow)">
+    <path d="M175 145 L320 130 C332 129 342 138 344 150 L382 390 C384 402 374 414 362 415 L158 438 C144 439 132 429 130 415 L156 160 C157 151 165 146 175 145 Z" fill="url(#shopBagGrad)" />
+    <path d="M320 130 L356 152 C364 157 367 166 366 175 L382 390 L344 150 C342 138 332 129 320 130 Z" fill="url(#foldGrad)" opacity="0.65" />
+    <path d="M156 160 L130 415 L118 395 C114 388 113 380 114 372 L138 178 C140 168 147 161 156 160 Z" fill="#4B712A" opacity="0.5" />
+    <path d="M228 140 C222 96 238 52 268 50 C298 48 308 92 300 132" fill="none" stroke="url(#handleGrad)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M232 138 C227 104 240 68 266 66 C292 64 300 98 296 130" fill="none" stroke="#2D4D1B" stroke-width="10" stroke-linecap="round" opacity="0.6" />
+    <g transform="translate(198, 192)">
+      <path d="M68 6 C84 6 98 12 108 22 C113 27 111 36 104 40 L94 47 C88 51 80 49 75 44 C69 38 61 34 52 35 C40 37 32 46 33 56 C34 68 47 73 66 80 C95 91 114 104 112 134 C109 164 83 186 52 188 C32 189 15 182 2 170 C-3 165 -1 157 6 153 L18 145 C24 141 32 142 37 148 C44 156 53 160 63 159 C76 157 84 148 83 138 C82 125 70 120 48 112 C21 102 4 88 5 60 C7 28 35 6 68 6 Z" fill="#FFFFFF" />
+      <circle cx="56" cy="98" r="7" fill="#95BF47" />
+    </g>
+  </g>
 </svg>

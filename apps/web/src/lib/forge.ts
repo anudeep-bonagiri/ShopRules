@@ -105,6 +105,19 @@ function step(kind: ForgeStep["kind"], title: string, detail: string, extra: Par
   return { kind, title, detail, at: new Date().toISOString(), ...extra };
 }
 
+export function countTestFunctions(code: string): number {
+  return (code.match(/^def (test_|assert_|check_)\w*\s*\(/gm) ?? []).length;
+}
+
+// Indent a module of top-level assertions into one test function the harness can run.
+function wrapAsTest(code: string): string {
+  const body = code
+    .split("\n")
+    .map((line) => (line.trim() ? `    ${line}` : ""))
+    .join("\n");
+  return `def test_module():\n${body}\n`;
+}
+
 export async function forgeCheck(account: AccountRow, product: ProductRow, rule: RuleRow, opts: { maxIterations?: number } = {}): Promise<ForgeRow> {
   const meter = newMeter();
   const steps: ForgeStep[] = [];
@@ -165,7 +178,34 @@ export async function forgeCheck(account: AccountRow, product: ProductRow, rule:
     },
     meter,
   );
-  steps.push(step("tests", `Nemotron 3 Nano wrote ${tests.cases.length} tests`, tests.cases.map((c) => `- ${c}`).join("\n"), { ms: Date.now() - t2, model: "nano", code: tests.tests_code }));
+  // Nano sometimes writes module-level asserts under comment headers instead of
+  // functions; the harness only runs functions. Ask once more with that feedback,
+  // then wrap whatever came back so at least one test runs.
+  let testFunctions = countTestFunctions(tests.tests_code);
+  if (testFunctions === 0) {
+    const retry = await chatJSON(
+      "nano",
+      {
+        name: "forge_tests",
+        purpose: `forge tests retry ${rule.key}`,
+        schema: TestSchema,
+        maxTokens: 1500,
+        temperature: 0.1,
+        system: "You fix a Python test module. The harness runs only functions whose names start with test_. Return JSON only: tests_code is the full rewritten module, cases lists one sentence per test function.",
+        user: `This module defines ${testFunctions} functions named test_*. Rewrite it so every check lives inside a function named test_* (2 to 4 functions), keeping the imports, the sources load, and every assertion. Module:\n\n${tests.tests_code}`,
+      },
+      meter,
+    );
+    if (countTestFunctions(retry.tests_code) > 0) {
+      tests.tests_code = retry.tests_code;
+      tests.cases = retry.cases;
+    } else {
+      tests.tests_code = wrapAsTest(tests.tests_code);
+      tests.cases = ["test_module: every assertion in the module, run as one test"];
+    }
+    testFunctions = countTestFunctions(tests.tests_code);
+  }
+  steps.push(step("tests", `Nemotron 3 Nano wrote ${testFunctions} test${testFunctions === 1 ? "" : "s"}`, tests.cases.map((c) => `- ${c}`).join("\n"), { ms: Date.now() - t2, model: "nano", code: tests.tests_code }));
 
   // 3. Run and iterate
   let status: ForgeRow["status"] = "failed";

@@ -87,7 +87,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
   );
 
   const logo = {
-    width: 124,
+    width: 136,
     topBarSource: "/logo.svg",
     contextualSaveBarSource: "/logo.svg",
     url: "/",

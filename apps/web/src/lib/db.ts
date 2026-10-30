@@ -1,4 +1,5 @@
 import { del, get, list, put } from "@vercel/blob";
+import postgres from "postgres";
 import type { Marketplace, ProductProfile, RuleFamily, VerifiedClaim } from "./schemas";
 import type { RuleSpec } from "./rules-catalog";
 
@@ -152,12 +153,34 @@ const ACCESS = { access: "private" as const };
 const MAX_RUNS = 400;
 const KEEP_VERSIONS = 3;
 
+// Two document stores share one interface. Postgres (DATABASE_URL) is the
+// default when set: one row per workspace, read in one query, written with an
+// optimistic version check. Vercel Blob (BLOB_READ_WRITE_TOKEN) keeps immutable
+// versions and lists them to find the newest, which Vercel bills as an advanced
+// operation per read and suspends on the Hobby plan past a threshold (D-12).
+
+interface DocStore {
+  name: "postgres" | "blob";
+  load(id: string): Promise<Workspace | null>;
+  save(id: string, ws: Workspace): Promise<void>;
+  remove(id: string, token: string | null): Promise<void>;
+  ids(): Promise<string[]>;
+  tokenGet(token: string): Promise<string | null>;
+  tokenSet(token: string, accountId: string): Promise<void>;
+}
+
 export function dbConfigured(): boolean {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+  return Boolean(process.env.DATABASE_URL || process.env.BLOB_READ_WRITE_TOKEN);
+}
+
+export function storeName(): "postgres" | "blob" | "none" {
+  if (process.env.DATABASE_URL) return "postgres";
+  if (process.env.BLOB_READ_WRITE_TOKEN) return "blob";
+  return "none";
 }
 
 function requireDb(): void {
-  if (!dbConfigured()) throw new Error("Storage is not configured. Set BLOB_READ_WRITE_TOKEN (Vercel Blob) in the environment.");
+  if (!dbConfigured()) throw new Error("Storage is not configured. Set DATABASE_URL (Postgres) or BLOB_READ_WRITE_TOKEN (Vercel Blob) in the environment.");
 }
 
 function now(): string {
@@ -177,6 +200,60 @@ export function newToken(): string {
   return "sr_live_" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// Postgres store
+
+let sqlClient: ReturnType<typeof postgres> | null = null;
+
+function sql(): ReturnType<typeof postgres> {
+  if (!sqlClient) {
+    sqlClient = postgres(process.env.DATABASE_URL as string, {
+      max: 4,
+      prepare: false,
+      idle_timeout: 20,
+      connect_timeout: 10,
+      ssl: process.env.DATABASE_SSL === "off" ? undefined : "require",
+    });
+  }
+  return sqlClient;
+}
+
+const pgStore: DocStore = {
+  name: "postgres",
+  async load(id) {
+    const rows = await sql()<Array<{ doc: Workspace | string }>>`select doc from workspaces where id = ${id}`;
+    const doc = rows[0]?.doc;
+    if (doc == null) return null;
+    return typeof doc === "string" ? (JSON.parse(doc) as Workspace) : doc;
+  },
+  async save(id, ws) {
+    const rows = await sql()<Array<{ id: string }>>`
+      insert into workspaces (id, doc, version, updated_at)
+      values (${id}, ${sql().json(ws as unknown as postgres.JSONValue)}, ${ws.version}, now())
+      on conflict (id) do update
+        set doc = excluded.doc, version = excluded.version, updated_at = now()
+        where workspaces.version < excluded.version
+      returning id`;
+    if (!rows.length) throw new Error(`Workspace ${id} changed underneath this write (version ${ws.version})`);
+  },
+  async remove(id) {
+    await sql()`delete from tokens where account_id = ${id}`;
+    await sql()`delete from workspaces where id = ${id}`;
+  },
+  async ids() {
+    const rows = await sql()<Array<{ id: string }>>`select id from workspaces order by updated_at desc`;
+    return rows.map((r) => r.id);
+  },
+  async tokenGet(token) {
+    const rows = await sql()<Array<{ account_id: string }>>`select account_id from tokens where token = ${token}`;
+    return rows[0]?.account_id ?? null;
+  },
+  async tokenSet(token, accountId) {
+    await sql()`insert into tokens (token, account_id) values (${token}, ${accountId}) on conflict (token) do update set account_id = excluded.account_id`;
+  },
+};
+
+// Vercel Blob store
+
 const accountDir = (id: string) => `accounts/${id}/`;
 const legacyPath = (id: string) => `accounts/${id}.json`;
 const tokenPath = (token: string) => `tokens/${token}.json`;
@@ -188,7 +265,6 @@ function versionName(id: string): string {
 }
 
 async function readBlob<T>(pathOrUrl: string): Promise<T | null> {
-  requireDb();
   try {
     const result = await get(pathOrUrl, { ...ACCESS, useCache: false });
     if (!result || !result.stream) return null;
@@ -203,7 +279,6 @@ async function readBlob<T>(pathOrUrl: string): Promise<T | null> {
 }
 
 async function listVersions(id: string): Promise<Array<{ pathname: string; url: string }>> {
-  requireDb();
   const out: Array<{ pathname: string; url: string }> = [];
   let cursor: string | undefined;
   do {
@@ -215,26 +290,72 @@ async function listVersions(id: string): Promise<Array<{ pathname: string; url: 
   return out;
 }
 
-async function loadWorkspace(id: string): Promise<Workspace | null> {
-  const versions = await listVersions(id);
-  const newest = versions.at(-1);
-  if (newest) return readBlob<Workspace>(newest.url);
-  // Workspaces created before versioning lived at accounts/<id>.json.
-  return readBlob<Workspace>(legacyPath(id));
-}
-
-async function writeWorkspace(id: string, ws: Workspace): Promise<void> {
-  requireDb();
-  ws.version = (ws.version ?? 0) + 1;
-  await put(versionName(id), JSON.stringify(ws), { ...ACCESS, addRandomSuffix: false, contentType: "application/json", cacheControlMaxAge: 0 });
-  void pruneVersions(id).catch(() => undefined);
-}
-
 async function pruneVersions(id: string): Promise<void> {
   const versions = await listVersions(id);
   if (versions.length <= KEEP_VERSIONS + 3) return;
   const stale = versions.slice(0, versions.length - KEEP_VERSIONS);
   await del(stale.map((v) => v.url));
+}
+
+const blobStore: DocStore = {
+  name: "blob",
+  async load(id) {
+    const versions = await listVersions(id);
+    const newest = versions.at(-1);
+    if (newest) return readBlob<Workspace>(newest.url);
+    // Workspaces created before versioning lived at accounts/<id>.json.
+    return readBlob<Workspace>(legacyPath(id));
+  },
+  async save(id, ws) {
+    await put(versionName(id), JSON.stringify(ws), { ...ACCESS, addRandomSuffix: false, contentType: "application/json", cacheControlMaxAge: 0 });
+    void pruneVersions(id).catch(() => undefined);
+  },
+  async remove(id, token) {
+    const urls = (await listVersions(id)).map((v) => v.url);
+    if (token) urls.push(tokenPath(token));
+    urls.push(legacyPath(id));
+    await del(urls);
+  },
+  async ids() {
+    const ids = new Set<string>();
+    let cursor: string | undefined;
+    do {
+      const page = await list({ prefix: "accounts/", mode: "folded", cursor, limit: 1000 });
+      for (const f of page.folders ?? []) {
+        const m = f.match(/^accounts\/([^/]+)\/$/);
+        if (m) ids.add(m[1]);
+      }
+      for (const b of page.blobs) {
+        const m = b.pathname.match(/^accounts\/([^/]+)\.json$/);
+        if (m) ids.add(m[1]);
+      }
+      cursor = page.hasMore ? page.cursor : undefined;
+    } while (cursor);
+    return Array.from(ids);
+  },
+  async tokenGet(token) {
+    const doc = await readBlob<{ account_id: string }>(tokenPath(token));
+    return doc?.account_id ?? null;
+  },
+  async tokenSet(token, accountId) {
+    await put(tokenPath(token), JSON.stringify({ account_id: accountId }), { ...ACCESS, addRandomSuffix: false, contentType: "application/json", cacheControlMaxAge: 0 });
+  },
+};
+
+function store(): DocStore {
+  requireDb();
+  return process.env.DATABASE_URL ? pgStore : blobStore;
+}
+
+// Workspace documents
+
+async function loadWorkspace(id: string): Promise<Workspace | null> {
+  return store().load(id);
+}
+
+async function writeWorkspace(id: string, ws: Workspace): Promise<void> {
+  ws.version = (ws.version ?? 0) + 1;
+  await store().save(id, ws);
 }
 
 async function mutate<T>(accountId: string, fn: (ws: Workspace) => T | Promise<T>): Promise<T> {
@@ -275,15 +396,15 @@ export async function getOrCreateAccount(id: string): Promise<AccountRow> {
   };
   const fresh: Workspace = { version: 0, account, products: [], rules: [], alerts: [], runs: [], skills: [], prices: [] };
   await writeWorkspace(id, fresh);
-  await put(tokenPath(account.token), JSON.stringify({ account_id: id }), { ...ACCESS, addRandomSuffix: false, contentType: "application/json", cacheControlMaxAge: 0 });
+  await store().tokenSet(account.token, id);
   return account;
 }
 
 export async function getAccountByToken(token: string): Promise<AccountRow | null> {
   if (!/^sr_live_[a-f0-9]{36}$/.test(token)) return null;
-  const doc = await readBlob<{ account_id: string }>(tokenPath(token));
-  if (!doc) return null;
-  const ws = await loadWorkspace(doc.account_id);
+  const accountId = await store().tokenGet(token);
+  if (!accountId) return null;
+  const ws = await loadWorkspace(accountId);
   return ws?.account ?? null;
 }
 
@@ -296,31 +417,12 @@ export async function updateAccount(id: string, patch: Partial<Pick<AccountRow, 
 }
 
 export async function listAccountIds(): Promise<string[]> {
-  requireDb();
-  const ids = new Set<string>();
-  let cursor: string | undefined;
-  do {
-    const page = await list({ prefix: "accounts/", mode: "folded", cursor, limit: 1000 });
-    for (const f of page.folders ?? []) {
-      const m = f.match(/^accounts\/([^/]+)\/$/);
-      if (m) ids.add(m[1]);
-    }
-    for (const b of page.blobs) {
-      const m = b.pathname.match(/^accounts\/([^/]+)\.json$/);
-      if (m) ids.add(m[1]);
-    }
-    cursor = page.hasMore ? page.cursor : undefined;
-  } while (cursor);
-  return Array.from(ids);
+  return store().ids();
 }
 
 export async function deleteAccount(id: string): Promise<void> {
-  const ws = await loadWorkspace(id);
-  const versions = await listVersions(id);
-  const urls = versions.map((v) => v.url);
-  if (ws) urls.push(tokenPath(ws.account.token));
-  urls.push(legacyPath(id));
-  if (urls.length) await del(urls);
+  const ws = await loadWorkspace(id).catch(() => null);
+  await store().remove(id, ws?.account.token ?? null);
 }
 
 // Products

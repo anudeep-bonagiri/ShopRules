@@ -138,7 +138,7 @@ export function buildRules(profile: ProductProfile, marketplace: Marketplace, sh
     title: "De minimis treatment of low-value imports",
     query: `de minimis exemption low value shipments ${origin} CBP ${year}`,
     include_domains: ["cbp.gov", "federalregister.gov", "whitehouse.gov"],
-    include_domains_mode: "prefer",
+    include_domains_mode: "strict",
     cadence_hours: 24,
     state: null,
     seed_note: null,

@@ -44,11 +44,19 @@ export interface PageFields {
 export function normalizeListingUrl(raw: string): string {
   let u: URL;
   try {
-    u = new URL(raw.trim());
+    const trimmed = raw.trim();
+    u = new URL(/^[a-z]+:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
   } catch {
     throw new ApiError(400, "That does not look like a listing URL.");
   }
   const host = u.hostname.toLowerCase();
+  if (!host.includes(".")) throw new ApiError(400, "That does not look like a listing URL.");
+  if (u.pathname === "/" || u.pathname === "") {
+    throw new ApiError(
+      422,
+      `${host} is a store homepage, not a product listing. Paste the product page itself: etsy.com/listing/..., amazon.com/dp/..., or yourstore.com/products/...`,
+    );
+  }
   if (host.includes("amazon.")) {
     const m = u.pathname.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i);
     if (m) return `https://${host.replace(/^www\./, "www.")}/dp/${m[1].toUpperCase()}`;
@@ -107,6 +115,111 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
   return out;
 }
 
+// Listing readers. Marketplaces block fetchers; these keep the product honest
+// when the page that came back is a bot wall or nothing at all.
+
+const HOSTNAME_RE = /^(www\.)?[a-z0-9-]+(\.[a-z0-9-]+)+$/i;
+const BLOCKED_RE =
+  /verify you are (a )?human|are you a robot|robot check|captcha|access denied|just a moment|attention required|press (and|&) hold|enable (javascript|cookies)|something went wrong on our end|api-services-support@amazon\.com|request blocked|unusual traffic|checking your browser|pardon our interruption/i;
+
+function looksBlocked(text: string, title: string | null): boolean {
+  if (text.length > 8000) return false;
+  if (title && HOSTNAME_RE.test(title.trim())) return true;
+  return BLOCKED_RE.test(text);
+}
+
+// A product name, or null when the string is a hostname, a store name, or a wall title.
+export function cleanTitle(raw?: string | null): string | null {
+  if (!raw) return null;
+  let s = raw.replace(/\s+/g, " ").trim();
+  s = s
+    .replace(/^amazon\.(com|ca|co\.uk|de)\s*:\s*/i, "")
+    .replace(/\s*[-|:]\s*(etsy( [a-z]+)?|amazon\.com|shopify)$/i, "")
+    .trim();
+  // Amazon titles carry a keyword tail after a pipe; the listing name is the head.
+  const head = s.split(" | ")[0].trim();
+  if (head.length >= 20) s = head;
+  if (s.length < 3) return null;
+  if (HOSTNAME_RE.test(s)) return null;
+  if (s.length < 32 && /^(etsy|amazon(\.com)?|shopify|just a moment|access denied|robot check|attention required|untitled)\b/i.test(s)) return null;
+  return s;
+}
+
+// The listing slug in the URL as words: /listing/123/wooden-stacking-toy,
+// /Wooden-Stacking-Toy/dp/B0..., /products/wooden-stacking-toy.
+export function titleFromUrl(url: string): string | null {
+  try {
+    const path = decodeURIComponent(new URL(url.trim()).pathname);
+    const m = path.match(/\/listing\/\d+\/([^/]+)/) ?? path.match(/^\/([^/]+)\/dp\//) ?? path.match(/\/products\/([^/]+)/);
+    const slug = m?.[1]?.replace(/[-_+]+/g, " ").trim();
+    if (!slug || slug.length < 3 || /^[a-z0-9]{10}$/i.test(slug)) return null;
+    return slug.replace(/\b[a-z]/g, (c) => c.toUpperCase()).slice(0, 200);
+  } catch {
+    return null;
+  }
+}
+
+// The same listing across locales and tracking variants: Etsy listing id,
+// Amazon ASIN, Shopify handle, else host and path.
+function listingKey(url: string): string | null {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase().replace(/^www\./, "");
+    const path = u.pathname;
+    const etsy = path.match(/\/listing\/(\d+)/);
+    if (etsy) return `etsy:${etsy[1]}`;
+    const asin = path.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i);
+    if (asin) return `amazon:${asin[1].toUpperCase()}`;
+    const handle = path.match(/\/products\/([^/?#]+)/);
+    if (handle) return `${host}:product:${handle[1].toLowerCase()}`;
+    return `${host}:${path.replace(/\/+$/, "").toLowerCase()}`;
+  } catch {
+    return null;
+  }
+}
+
+async function indexedListing(url: string, rawUrl: string, meter: Meter): Promise<{ title: string; content: string } | null> {
+  const key = listingKey(url);
+  if (!key) return null;
+  try {
+    const res = await tavilySearch(
+      {
+        query: `${titleFromUrl(rawUrl) ?? ""} ${url}`.trim(),
+        max_results: 5,
+        search_depth: "advanced",
+        chunks_per_source: 3,
+        include_domains: [domainOf(url)],
+        include_domains_mode: "strict",
+        include_raw_content: "markdown",
+      },
+      meter,
+    );
+    const same = (res.results ?? []).filter((r) => listingKey(r.url) === key);
+    if (!same.length) return null;
+    const title = same.map((r) => r.title).find((t) => cleanTitle(t)) ?? same[0].title;
+    const raw = same.map((r) => (r.raw_content ?? "").trim()).find((t) => t.length > 200 && !looksBlocked(t, null));
+    const content = raw ? stripNav(raw) : Array.from(new Set(same.map((r) => r.content.trim()).filter(Boolean))).join("\n\n");
+    return content.length >= 40 ? { title, content } : null;
+  } catch (err) {
+    console.error("[shop-rules] indexed listing lookup failed", err);
+    return null;
+  }
+}
+
+// Markdown from a store page opens with hundreds of nav links. Drop the lines
+// that are only links or images so the classifier reads the listing.
+function stripNav(markdown: string): string {
+  const kept: string[] = [];
+  for (const line of markdown.split("\n")) {
+    const t = line.trim();
+    if (!t) continue;
+    const bare = t.replace(/!?\[[^\]]*\]\([^)]*\)/g, "").replace(/[*#>|\-\s_]+/g, "");
+    if (bare.length < 3) continue;
+    kept.push(t);
+  }
+  return kept.join("\n");
+}
+
 // 1. Ingest a listing: Tavily Extract reads the page, Nemotron Nano classifies it,
 //    the catalog seeds the watch rules.
 
@@ -121,13 +234,30 @@ export async function ingestProduct(account: AccountRow, rawUrl: string, page?: 
   const marketplace = hinted ?? marketplaceFromUrl(url);
 
   let extracted = "";
+  let extractTitle: string | null = null;
   let extractError: string | null = null;
   try {
     const ex = await tavilyExtract([url], { extract_depth: "advanced", format: "markdown" }, meter);
     extracted = ex.results[0]?.raw_content ?? "";
+    extractTitle = ex.results[0]?.title ?? null;
     if (!extracted && ex.failed_results?.[0]) extractError = ex.failed_results[0].error;
   } catch (err) {
     extractError = err instanceof Error ? err.message : String(err);
+  }
+  // Marketplaces answer readers with a bot wall whose title is the bare hostname.
+  // That text is not the listing, so it must not become the product.
+  if (extracted && looksBlocked(extracted, extractTitle)) {
+    extractError = "the marketplace served a bot check instead of the listing";
+    extracted = "";
+    extractTitle = null;
+  }
+  // When the live fetch fails, Tavily's index usually holds the listing: Search
+  // with the URL as the query, restricted to the store, keeping only the result
+  // that is the same listing (same listing id, ASIN, or product handle).
+  let indexed: { title: string; content: string } | null = null;
+  if (!extracted) {
+    indexed = await indexedListing(url, rawUrl, meter);
+    if (indexed) extractError = null;
   }
 
   const pageText = [
@@ -139,7 +269,8 @@ export async function ingestProduct(account: AccountRow, rawUrl: string, page?: 
     .filter(Boolean)
     .join("\n");
 
-  const combined = `${pageText}\n\n${extracted}`.trim();
+  const sourceText = extracted ? stripNav(extracted) : indexed ? `Title: ${indexed.title}\n${indexed.content}` : "";
+  const combined = `${pageText}\n\n${sourceText}`.trim();
   if (combined.length < 40) {
     throw new ApiError(422, `Could not read that listing${extractError ? ` (${extractError})` : ""}. Add it from the extension, which sends the page fields along.`);
   }
@@ -166,6 +297,9 @@ export async function ingestProduct(account: AccountRow, rawUrl: string, page?: 
     meter,
   );
 
+  // On Etsy and Amazon the page title is the listing title; on a Shopify store it
+  // carries the shop name, so the classifier's name wins there.
+  const siteTitle = marketplace === "amazon" || marketplace === "etsy" ? cleanTitle(extractTitle) : null;
   const price = profile.price ?? page?.price ?? null;
   const currency = profile.currency ?? page?.currency ?? (price != null ? "USD" : null);
   const imageUrl = page?.image ?? firstImage(extracted);
@@ -177,7 +311,7 @@ export async function ingestProduct(account: AccountRow, rawUrl: string, page?: 
       account_id: account.id,
       url,
       marketplace,
-      title: (page?.title || profile.title || "Untitled listing").slice(0, 200),
+      title: (cleanTitle(page?.title) ?? siteTitle ?? cleanTitle(profile.title) ?? cleanTitle(indexed?.title) ?? cleanTitle(extractTitle) ?? titleFromUrl(rawUrl) ?? "Untitled listing").slice(0, 200),
       price,
       currency,
       image_url: imageUrl,
