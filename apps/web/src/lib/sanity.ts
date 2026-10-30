@@ -255,10 +255,17 @@ export function auditRuleCheck(input: AuditInput): AuditResult {
   ]);
   const origin = product.profile.origin_country ? COUNTRY_NAMES[product.profile.origin_country.toUpperCase()] : null;
   if (origin) for (const t of tokens(origin)) productTerms.add(t);
-  const GENERIC = new Set(["standar", "safety", "duty", "duties", "tariff", "tariffs", "section", "rule", "rules", "requir", "policy", "thresh", "nexus", "sales", "econom", "seller", "remote", "market", "state", "collec"]);
+  // Six-letter stems (see tokens()) of words every rule in a family shares; they do not identify a subject.
+  const GENERIC = new Set(["standa", "safety", "duty", "duties", "tariff", "sectio", "rule", "rules", "requir", "policy", "thresh", "nexus", "sales", "econom", "seller", "remote", "market", "state", "collec", "produc", "import", "additi", "notice", "change", "update", "mandat"]);
   const ruleTerms = new Set<string>([...tokens(rule.title), ...tokens(rule.query)].filter((t) => !GENERIC.has(t) && !/^\d{4}$/.test(t)));
   if (rule.state) ruleTerms.add(rule.state.toLowerCase());
-  const body = `${check.headline} ${backedText}`.toLowerCase();
+  // Only verified quotes count: they are source text, while the headline and
+  // claim prose are the model's own words and can echo the rule's vocabulary.
+  const body = verified
+    .filter((c) => c.backed)
+    .map((c) => c.quote)
+    .join(" \n ")
+    .toLowerCase();
   const bodyTokens = tokens(body);
   let productOverlap = 0;
   let ruleOverlap = 0;
