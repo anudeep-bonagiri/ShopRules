@@ -401,17 +401,17 @@ export async function compareListings(account: AccountRow, input: { title: strin
     },
     meter,
   );
-  const rows = (search.results ?? []).slice(0, 8).map((r, i) => `[${i + 1}] ${r.title}\nurl: ${r.url}\ntext: ${r.content.slice(0, 500)}`).join("\n\n");
+  const rows = (search.results ?? []).slice(0, 6).map((r, i) => `[${i + 1}] ${r.title.slice(0, 90)}\nurl: ${r.url.slice(0, 160)}\ntext: ${r.content.slice(0, 400)}`).join("\n\n");
   const parsed = await chatJSON(
     "nano",
     {
       name: "competitor_listings",
       purpose: "compare prices",
       schema: CompetitorListingsSchema,
-      maxTokens: 900,
+      maxTokens: 1800,
       system: [
         "You read web search results about a product and list competing listings with the price actually visible in the text.",
-        "Only include a listing when the text shows a price for a comparable product; price null is allowed when the listing matches but the price is missing. marketplace is the site name (amazon, etsy, walmart, ebay, target, other).",
+        "At most 5 listings. Keep each title under 70 characters and copy the url exactly as given. Only include a listing when the text shows a price for a comparable product; price null is allowed when the listing matches but the price is missing. marketplace is the site name (amazon, etsy, walmart, ebay, target, other).",
         `The seller's own price is ${input.price ?? "unknown"}. price_position compares the seller to the median competitor price (below_market if 10% lower, above_market if 10% higher, at_market otherwise, unknown if no prices).`,
         "note: one sentence on what the seller should take from this. Return JSON only.",
       ].join(" "),
