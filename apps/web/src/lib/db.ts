@@ -1,4 +1,5 @@
-import { del, get, list, put } from "@vercel/blob";
+import { del, get, list, put } from "./blob";
+import { offlineMode } from "./offline";
 import type { CompetitorListings, Marketplace, ProductProfile, RuleFamily, VerifiedClaim } from "./schemas";
 import type { RuleSpec } from "./rules-catalog";
 import type { PricingResult } from "./pricing";
@@ -200,7 +201,7 @@ const MAX_RUNS = 400;
 const KEEP_VERSIONS = 3;
 
 export function dbConfigured(): boolean {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+  return Boolean(process.env.BLOB_READ_WRITE_TOKEN) || offlineMode().store === "local";
 }
 
 function requireDb(): void {
@@ -356,7 +357,17 @@ export async function getOrCreateAccount(id: string): Promise<AccountRow> {
     created_at: now(),
   };
   const fresh: Workspace = { version: 0, account, products: [], rules: [], alerts: [], runs: [], skills: [], prices: [] };
-  await writeWorkspace(id, fresh, fresh.version ?? 0);
+  try {
+    await writeWorkspace(id, fresh, fresh.version ?? 0);
+  } catch (err) {
+    // Several first-visit requests race to create the same workspace; the
+    // compare-and-swap lets exactly one win and the others read its result.
+    if (err instanceof WriteConflict) {
+      const won = await loadWorkspace(id);
+      if (won) return won.account;
+    }
+    throw err;
+  }
   await put(tokenPath(account.token), JSON.stringify({ account_id: id }), { ...ACCESS, addRandomSuffix: false, contentType: "application/json", cacheControlMaxAge: 0 });
   return account;
 }

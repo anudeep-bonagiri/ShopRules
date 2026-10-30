@@ -35,5 +35,5 @@ Runs after the verifier on every verdict, before an alert is created. Each adjus
 ## Tests
 
 - `npm test` runs the unit tests for pricing, the HTS catalog, the guardrails, and the product overrides (`node --test`, no model, no network).
-- `npm run eval:offline` replays the golden cases in `scripts/eval-cases.json` (including traps: another heading on the right site, a crib rule shown to a toy, a 2019 action, a two-rate quote) through the verifier and the guardrails and writes `docs/EVAL.offline.md`.
+- `npm run eval:offline` replays the golden cases in `apps/web/src/lib/fixtures/eval-cases.json` (including traps: another heading on the right site, a crib rule shown to a toy, a 2019 action, a two-rate quote) through the verifier and the guardrails and writes `docs/EVAL.offline.md`.
 - `npm run eval` runs the same cases against the live model with the production prompt and writes `docs/EVAL.md` with per-field accuracy and cost. It costs money and is run once before submission.

@@ -2,6 +2,7 @@ import { dbConfigured } from "@/lib/db";
 import { nemotronConfigured, MODELS } from "@/lib/nemotron";
 import { tavilyMode } from "@/lib/tavily";
 import { json } from "@/lib/account";
+import { offlineMode } from "@/lib/offline";
 
 export const dynamic = "force-dynamic";
 
@@ -13,5 +14,6 @@ export async function GET() {
     nemotron_configured: nemotronConfigured(),
     storage_configured: dbConfigured(),
     models: MODELS,
+    mode: offlineMode(),
   });
 }

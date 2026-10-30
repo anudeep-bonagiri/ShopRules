@@ -11,3 +11,4 @@ dist/
 *.log
 tsconfig.tsbuildinfo
 .vercel
+.sr-data/

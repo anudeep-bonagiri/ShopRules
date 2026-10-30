@@ -31,7 +31,7 @@ import {
 } from "@/components/stitch";
 import { WatchForm } from "@/components/WatchForm";
 
-type Health = { ok: boolean; tavily_mode: string; nemotron_configured: boolean; storage_configured: boolean };
+type Health = { ok: boolean; tavily_mode: string; nemotron_configured: boolean; storage_configured: boolean; mode?: { store: "blob" | "local"; models: "live" | "canned"; tavily: "live" | "canned" } };
 type Rule = RuleRow & { product_title: string };
 type Family = "all" | "tariff" | "tax" | "safety" | "policy" | "price";
 const FAMILIES: Family[] = ["all", "tariff", "tax", "safety", "policy", "price"];
@@ -164,8 +164,12 @@ export default function WatchlistPage() {
         ) : null}
       </div>
 
-      {health.data && (!health.data.nemotron_configured || !health.data.storage_configured) ? (
-        <Banner tone="warning" title="Setup incomplete">
+      {health.data?.mode?.models === "canned" ? (
+        <Banner tone="info">
+          <p>Demo mode: no NEBIUS_API_KEY on this server, so Nemotron answers come from recorded fixtures and the store is a local file. Checks, guardrails, and pricing run for real; set the keys in apps/web/.env.local for live sources.</p>
+        </Banner>
+      ) : health.data && (!health.data.nemotron_configured || !health.data.storage_configured) ? (
+        <Banner tone="warning">
           <p>
             {!health.data.storage_configured ? "Storage is not configured (BLOB_READ_WRITE_TOKEN). " : ""}
             {!health.data.nemotron_configured ? "Nemotron on Nebius Token Factory is not configured (NEBIUS_API_KEY). Checks will fail until it is set." : ""}

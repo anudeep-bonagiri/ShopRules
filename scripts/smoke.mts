@@ -49,7 +49,7 @@ function readEnvLocal(): Record<string, string> {
   const file = join(root, "apps", "web", ".env.local");
   const out: Record<string, string> = {};
   if (!existsSync(file)) {
-    console.warn("smoke: apps/web/.env.local is missing; storage and models will be unconfigured and pages will show their error states.");
+    console.warn("smoke: apps/web/.env.local is missing; running in offline demo mode (local file store, canned Nemotron and Tavily answers from the eval fixtures).");
     return out;
   }
   for (const line of readFileSync(file, "utf8").split("\n")) {
@@ -135,7 +135,7 @@ async function main(): Promise<void> {
   const emptyWatchlist = await page.getByText("Nothing to watch yet").count();
   const storageDown = await page.getByText(/Storage is not configured|not connected to a workspace|unreachable/i).count();
   if (emptyWatchlist > 0 && storageDown === 0) {
-    console.log("smoke: watchlist is empty, loading the demo shop (live Tavily + Nemotron calls)");
+    console.log("smoke: watchlist is empty, loading the demo shop");
     await page.getByRole("button", { name: "Load demo shop" }).first().click();
     await page.waitForFunction(() => !document.querySelector('[aria-busy="true"]') && !/Loading/.test(document.body.innerText), null, { timeout: 180_000 }).catch(() => undefined);
     await page.waitForTimeout(1500);

@@ -3,6 +3,8 @@ import { zodResponseFormat } from "openai/helpers/zod";
 import type { ChatCompletionCreateParamsNonStreaming } from "openai/resources/chat/completions";
 import type { ZodTypeAny, z } from "zod";
 import type { Meter } from "./schemas";
+import { offlineMode } from "./offline";
+import { cannedChatJSON } from "./canned";
 
 // NVIDIA Nemotron 3 on Nebius Token Factory through the OpenAI-compatible API.
 // Nano handles the fast, cheap calls (extraction, classification, skills).
@@ -87,6 +89,7 @@ export interface ChatJsonOptions<S extends ZodTypeAny> {
 }
 
 export async function chatJSON<S extends ZodTypeAny>(tier: Tier, opts: ChatJsonOptions<S>, meter?: Meter): Promise<z.infer<S>> {
+  if (offlineMode().models === "canned") return cannedChatJSON(tier, opts, meter);
   const openai = getClient();
   const model = MODELS[tier];
   const started = Date.now();
