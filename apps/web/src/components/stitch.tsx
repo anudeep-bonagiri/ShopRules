@@ -192,7 +192,7 @@ export function StatusPill({ tone = "neutral", dot, live, caps = true, children,
 
 export function ChipRow({ children, label }: { children: ReactNode; label?: string }) {
   return (
-    <div className="sr-chips" role="tablist" aria-label={label}>
+    <div className="sr-chips" role="group" aria-label={label}>
       {children}
     </div>
   );
@@ -200,7 +200,7 @@ export function ChipRow({ children, label }: { children: ReactNode; label?: stri
 
 export function Chip({ active, onClick, children, count }: { active?: boolean; onClick?: () => void; children: ReactNode; count?: number }) {
   return (
-    <button type="button" role="tab" aria-selected={Boolean(active)} className={cx("sr-chip", active && "sr-chip--active")} onClick={onClick}>
+    <button type="button" aria-pressed={Boolean(active)} className={cx("sr-chip", active && "sr-chip--active")} onClick={onClick}>
       {children}
       {count != null ? <span className="sr-chip__count">{count}</span> : null}
     </button>
