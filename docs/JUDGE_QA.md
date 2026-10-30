@@ -34,7 +34,7 @@ Answers point at files that exist. "Not built" is a complete answer.
 
 **Reusable skills?** Dismiss an alert with a reason and Nano writes a one-line standing instruction scoped to the product, the rule family, or the account. Future checks follow it.
 
-**Data under the seller's control?** One private Blob document per workspace. Self-host with your own Blob store or the Postgres schema in `apps/web/supabase/migration.sql`.
+**Data under the seller's control?** One Postgres row per workspace, read and written only by the app. Self-host with your own Postgres (`apps/web/supabase/store.sql`) or your own Blob store. No one else's data is in the document, and the schema is two tables.
 
 **Takes action?** Drafts the reprice with the price that keeps your margin, the compliance step, or the tax registration; the seller approves. It does not change a listing by itself (`docs/not-built.md`).
 

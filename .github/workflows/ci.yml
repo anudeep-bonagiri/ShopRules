@@ -1,0 +1,37 @@
+name: ci
+on:
+  push:
+  pull_request:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: dependencies
+        run: npm ci || npm install
+      - name: typecheck web and extension
+        run: npm run typecheck
+      - name: build extension
+        run: npm run build:ext
+      - name: build web (no keys, the build must not need them)
+        run: npm run build:web
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: no em dashes in outward prose
+        run: |
+          set -e
+          files="README.md extension/README.md docs/DEVPOST_FULL.md docs/VIDEO.md docs/not-built.md docs/CLAIMS_AUDIT.md docs/JUDGE_QA.md docs/DECISIONS.md docs/PROJECT_STATUS.md docs/FACTS.md docs/api.md docs/numbers_allowed.txt docs/tracks_allowed.txt"
+          for f in $files; do [ -f "$f" ] || { echo "missing $f"; exit 1; }; done
+          if grep -nP '\x{2014}|\x{2013}' $files; then echo "em or en dash found"; exit 1; fi
+          echo "scanned $(echo $files | wc -w) files"
