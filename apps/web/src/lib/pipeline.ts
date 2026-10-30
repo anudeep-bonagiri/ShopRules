@@ -574,10 +574,11 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
   // What the seller was already told for this rule, and how the price moved:
   // the model sees it so it reports only what is new, and the guardrails use it
   // to drop repeats.
-  const [previousAlerts, priceRows] = await Promise.all([
-    listAlerts(account.id, "all", product.id).then((rows) => rows.filter((a) => a.rule_id === rule.id)),
+  const [productAlerts, priceRows] = await Promise.all([
+    listAlerts(account.id, "all", product.id),
     listPrices(product.id, account.id).catch(() => []),
   ]);
+  const previousAlerts = productAlerts.filter((a) => a.rule_id === rule.id);
   const history = historyContext(previousAlerts, priceRows.map((p) => ({ at: p.at, price: Number(p.price) })), today);
 
   const view = { ...product, profile: effectiveProfile(product), price: effectivePrice(product) };
@@ -603,7 +604,7 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
 
   // Deterministic guardrails: numbers must be in the quotes, actions must fit the
   // rule, the quotes must be about this product, and repeats are dropped.
-  const audit = auditRuleCheck({ check: raw, verified: verifiedRaw.claims, rule, product: view, previous: previousAlerts, sources, today });
+  const audit = auditRuleCheck({ check: raw, verified: verifiedRaw.claims, rule, product: view, previous: productAlerts, sources, today });
   const check = audit.check;
   const backedCount = audit.verified.filter((c) => c.backed).length;
   // Sales-tax rules: the parsed threshold counts only when a backed quote states the numbers.

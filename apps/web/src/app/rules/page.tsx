@@ -57,6 +57,19 @@ export default function RulesPage() {
   };
   const paused = rules.filter((r) => r.paused).length;
   const visible = (family === "all" ? rules : rules.filter((r) => r.family === family)).slice().sort((a, b) => (b.last_run_at ?? "").localeCompare(a.last_run_at ?? ""));
+  // One card per product, products in order of their most recently run rule.
+  const groups = (() => {
+    const out: Array<{ productId: string; title: string; rules: typeof visible }> = [];
+    for (const r of visible) {
+      let g = out.find((x) => x.productId === r.product_id);
+      if (!g) {
+        g = { productId: r.product_id, title: r.product_title || "Product", rules: [] };
+        out.push(g);
+      }
+      g.rules.push(r);
+    }
+    return out;
+  })();
 
   async function patch(rule: Rule, body: { paused?: boolean; cadence_hours?: number }, done: string) {
     setBusy(rule.id);
@@ -134,9 +147,24 @@ export default function RulesPage() {
             <SrButton onClick={() => setFamily("all")}>Show all rules</SrButton>
           </EmptyCard>
         ) : (
-          <SrCard flush>
+          <div className="sr-stack">
+            {groups.map((g) => (
+              <SrCard key={g.productId} flush>
+                <div className="sr-group-head">
+                  <div className="sr-grow" style={{ minWidth: 0 }}>
+                    <NextLink href={`/products/${g.productId}`} className="sr-group-title sr-truncate">
+                      {g.title}
+                    </NextLink>
+                    <p className="sr-xs sr-num" style={{ marginTop: 2 }}>
+                      {g.rules.length} rule{g.rules.length === 1 ? "" : "s"}, {g.rules.filter((r) => r.last_run_at).length} checked, {g.rules.filter((r) => r.paused).length} paused
+                    </p>
+                  </div>
+                  <StatusPill tone={g.rules.some((r) => lastAlertByRule.get(r.id)?.status === "new") ? "critical" : "neutral"} caps={false}>
+                    {g.rules.filter((r) => lastAlertByRule.get(r.id)?.status === "new").length} open alert{g.rules.filter((r) => lastAlertByRule.get(r.id)?.status === "new").length === 1 ? "" : "s"}
+                  </StatusPill>
+                </div>
             <div className="sr-rows">
-              {visible.map((r) => {
+              {g.rules.map((r) => {
                 const last = lastAlertByRule.get(r.id);
                 return (
                   <div key={r.id} className="sr-stack" style={{ padding: "12px 14px", gap: 6, opacity: r.paused ? 0.75 : 1 }}>
@@ -179,7 +207,9 @@ export default function RulesPage() {
                 );
               })}
             </div>
-          </SrCard>
+              </SrCard>
+            ))}
+          </div>
         )}
       </section>
     </div>

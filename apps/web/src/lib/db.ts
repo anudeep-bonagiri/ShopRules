@@ -64,6 +64,8 @@ export interface ProductRow {
   created_at: string;
   last_checked_at: string | null;
   open_alerts?: number;
+  /** Last 30 price points, oldest first, for list views (sparkline and change since first seen). */
+  price_points?: Array<{ at: string; price: number }>;
 }
 
 export interface RuleRow extends RuleSpec {
@@ -430,7 +432,17 @@ export async function deleteAccount(id: string): Promise<void> {
 function withOpenCounts(ws: Workspace, products: ProductRow[]): ProductRow[] {
   const counts = new Map<string, number>();
   for (const a of ws.alerts) if (a.status === "new") counts.set(a.product_id, (counts.get(a.product_id) ?? 0) + 1);
-  return products.map((p) => ({ ...p, open_alerts: counts.get(p.id) ?? 0 }));
+  const points = new Map<string, Array<{ at: string; price: number }>>();
+  for (const pr of ws.prices) {
+    const list = points.get(pr.product_id) ?? [];
+    list.push({ at: pr.at, price: Number(pr.price) });
+    points.set(pr.product_id, list);
+  }
+  return products.map((p) => ({
+    ...p,
+    open_alerts: counts.get(p.id) ?? 0,
+    price_points: (points.get(p.id) ?? []).sort((a, b) => a.at.localeCompare(b.at)).slice(-30),
+  }));
 }
 
 export async function listProducts(accountId: string): Promise<ProductRow[]> {

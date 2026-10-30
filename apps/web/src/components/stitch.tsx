@@ -262,7 +262,11 @@ export function ProgressRow({ label, value, pct, tone = "success", foot }: { lab
       <div className={cx("sr-progress", tone === "critical" && "sr-progress--critical", tone === "warning" && "sr-progress--warning")}>
         <span style={{ width: `${width}%` }} />
       </div>
-      {foot ? <div className="sr-row sr-row--between sr-xs">{foot}</div> : null}
+      {foot ? (
+        <div className="sr-row sr-row--between sr-row--wrap sr-xs" style={{ alignItems: "flex-start", gap: "2px 8px" }}>
+          {foot}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -655,7 +659,7 @@ export function PriorityGroup({ product, alerts, settings, fallbackTitle }: { pr
             {product?.profile?.hts_candidates?.[0]?.code ? <span className="sr-xs sr-num sr-truncate">HS {product.profile.hts_candidates[0].code}</span> : null}
           </div>
         </div>
-        <div className="sr-row" style={{ gap: 8 }}>
+        <div className="sr-row" style={{ gap: 8, flexShrink: 0 }}>
           <StatusPill tone={openCount > 0 ? "critical" : "neutral"} caps={false}>
             {alerts.length} alert{alerts.length === 1 ? "" : "s"}
           </StatusPill>

@@ -6,6 +6,7 @@ import NextLink from "next/link";
 import { useState } from "react";
 import { timeAgo, useApi } from "@/lib/client";
 import { fmtMoney } from "@/lib/economics";
+import { deltaSummary, sparklinePath, toChartPoints } from "@/lib/chart";
 import type { ProductRow } from "@/lib/db";
 import { EmptyCard, marketplaceLabel, PageError, ProductThumb, Skeleton, SrButton, SrCard, StatusPill } from "@/components/stitch";
 import { WatchForm } from "@/components/WatchForm";
@@ -72,6 +73,7 @@ export default function InspectorListPage() {
                     </span>
                   </div>
                 </div>
+                <PriceCell points={p.price_points ?? []} />
                 <div className="sr-right sr-stack" style={{ gap: 4, alignItems: "flex-end" }}>
                   <span className="sr-body sr-num" style={{ fontWeight: 600 }}>
                     {fmtMoney(p.price, p.currency || "USD")}
@@ -92,6 +94,28 @@ export default function InspectorListPage() {
           </div>
         </SrCard>
       )}
+    </div>
+  );
+}
+
+// Change since first seen and a 30-point sparkline, from the product's stored
+// price points. Gain and loss use the shared tokens; no color without a number.
+function PriceCell({ points }: { points: Array<{ at: string; price: number }> }) {
+  const pts = toChartPoints(points);
+  const d = deltaSummary(pts);
+  if (!d || pts.length < 2) return <span className="sr-xs sr-desktop-only" style={{ width: 120, textAlign: "right" }}>no history yet</span>;
+  const up = d.direction === "up";
+  const flat = d.direction === "flat";
+  const color = flat ? "var(--sr-text-2)" : up ? "var(--sr-primary)" : "var(--sr-critical)";
+  const { path } = sparklinePath(pts, 84, 22);
+  return (
+    <div className="sr-desktop-only sr-stack" style={{ alignItems: "flex-end", gap: 2, width: 120 }}>
+      <span className="sr-xs sr-num" style={{ color, fontWeight: 600 }}>
+        {flat ? "=" : up ? "\u2191" : "\u2193"} {Math.abs(d.pct).toFixed(1)}% since added
+      </span>
+      <svg width="84" height="22" viewBox="0 0 84 22" aria-hidden focusable="false">
+        <path d={path} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+      </svg>
     </div>
   );
 }

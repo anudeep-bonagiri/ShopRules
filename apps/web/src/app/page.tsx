@@ -349,7 +349,7 @@ export default function WatchlistPage() {
                   }
                   foot={
                     <>
-                      <span className="sr-truncate">
+                      <span className="sr-grow" style={{ minWidth: 180 }}>
                         {facilitators.length ? `${facilitators.join(" and ")} collect for you here (marketplace facilitator)` : ""}
                         {facilitators.length && selfCollect ? ". " : ""}
                         {selfCollect || !facilitators.length ? (

@@ -11,7 +11,7 @@ import { nexusSeed } from "@/lib/nexus";
 import { ConnectExtension } from "@/components/ConnectExtension";
 import { PriceSettings } from "@/components/PriceSettings";
 
-type Health = { ok: boolean; tavily_mode: string; nemotron_configured: boolean; storage_configured: boolean; models: Record<string, string> };
+type Health = { ok: boolean; tavily_mode: string; nemotron_configured: boolean; storage_configured: boolean; models: Record<string, string>; mode?: { store: "blob" | "local"; models: "live" | "canned"; tavily: "live" | "canned" } };
 
 export default function SettingsPage() {
   const { data, refresh } = useApi<{ account: AccountRow & { telegram_configured: boolean } }>("/api/account");
@@ -163,8 +163,8 @@ export default function SettingsPage() {
           </p>
         </div>
         {health.data ? (
-          <StatusPill tone={health.data.nemotron_configured && health.data.storage_configured ? "success" : "warning"} caps={false} live={health.data.nemotron_configured && health.data.storage_configured}>
-            {health.data.nemotron_configured && health.data.storage_configured ? "Workspace ready" : "Setup incomplete"}
+          <StatusPill tone={health.data.mode?.models === "canned" ? "info" : health.data.nemotron_configured && health.data.storage_configured ? "success" : "warning"} caps={false} live={health.data.nemotron_configured && health.data.storage_configured}>
+            {health.data.mode?.models === "canned" ? "Demo mode" : health.data.nemotron_configured && health.data.storage_configured ? "Workspace ready" : "Setup incomplete"}
           </StatusPill>
         ) : null}
       </div>
@@ -339,9 +339,9 @@ export default function SettingsPage() {
             </h2>
             <KV
               rows={[
-                ["Web access", <StatusPill key="w" tone="success">{health.data?.tavily_mode === "keyed" ? "Tavily, keyed" : "Tavily, keyless"}</StatusPill>],
-                ["Models", health.data?.nemotron_configured ? <StatusPill key="m" tone="success">Nemotron ready</StatusPill> : <StatusPill key="m" tone="critical">Missing NEBIUS_API_KEY</StatusPill>],
-                ["Storage", health.data?.storage_configured ? <StatusPill key="s" tone="success">Vercel Blob</StatusPill> : <StatusPill key="s" tone="critical">Missing BLOB_READ_WRITE_TOKEN</StatusPill>],
+                ["Web access", health.data?.mode?.tavily === "canned" ? <StatusPill key="w" tone="info">Recorded fixtures (demo mode)</StatusPill> : <StatusPill key="w" tone="success">{health.data?.tavily_mode === "keyed" ? "Tavily, keyed" : "Tavily, keyless"}</StatusPill>],
+                ["Models", health.data?.mode?.models === "canned" ? <StatusPill key="m" tone="info">Canned answers (demo mode)</StatusPill> : health.data?.nemotron_configured ? <StatusPill key="m" tone="success">Nemotron ready</StatusPill> : <StatusPill key="m" tone="critical">Missing NEBIUS_API_KEY</StatusPill>],
+                ["Storage", health.data?.mode?.store === "local" ? <StatusPill key="s" tone="info">Local file (demo mode)</StatusPill> : health.data?.storage_configured ? <StatusPill key="s" tone="success">Vercel Blob</StatusPill> : <StatusPill key="s" tone="critical">Missing BLOB_READ_WRITE_TOKEN</StatusPill>],
               ]}
             />
             <p className="sr-xs" style={{ marginTop: 8 }}>
