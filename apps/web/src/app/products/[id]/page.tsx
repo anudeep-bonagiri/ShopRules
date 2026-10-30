@@ -12,6 +12,7 @@ import { Sparkline } from "@/components/ui";
 import { ForgeListRow, ForgeStepper, useForgeStageTimer } from "@/components/forge";
 import {
   AccentCard,
+  alertEconomics,
   alertTone,
   AuditRow,
   BackLink,
@@ -80,8 +81,8 @@ export default function ProductInspectorPage() {
   }
 
   async function draftReprice() {
-    if (!top || top.action?.suggested_price == null) return;
-    const price = top.action.suggested_price;
+    const price = top ? (alertEconomics(top, product, settings)?.suggested_price ?? null) : null;
+    if (!top || price == null) return;
     setDrafting(true);
     setActionError(null);
     try {
@@ -182,7 +183,7 @@ export default function ProductInspectorPage() {
   const unitCostPct = settings?.unit_cost_pct ?? 45;
   const units = settings?.units_per_week ?? 20;
   const base = computeEconomics({ price: product.price, unit_cost_pct: unitCostPct });
-  const econ = top ? computeEconomics({ price: product.price, unit_cost_pct: unitCostPct, duty_delta_pct: top.impact?.tariff_rate_change_pct ?? null, units_per_week: units, suggested_price: top.action?.suggested_price ?? null }) : null;
+  const econ = top ? alertEconomics(top, product, settings) : null;
   const hasDuty = Boolean(econ && econ.new_margin_pct != null);
   const hts = profile?.hts_candidates?.[0];
   const topTone = top ? alertTone(top) : "success";
@@ -203,7 +204,7 @@ export default function ProductInspectorPage() {
     profile?.is_food_contact ? "Food contact" : null,
     profile?.is_supplement_or_food ? "Food or supplement" : null,
   ].filter(Boolean) as string[];
-  const suggestedRaw = top?.action?.suggested_price ?? null;
+  const suggestedRaw = econ?.suggested_price ?? null;
   const suggested = suggestedRaw != null && product.price != null && Math.abs(suggestedRaw - product.price) < 0.005 ? null : suggestedRaw;
   const llmCost = result ? result.meter.llm.reduce((s, c) => s + c.cost_usd, 0) : 0;
 
@@ -527,6 +528,7 @@ export default function ProductInspectorPage() {
                 price={suggested}
                 currency={currency}
                 preservedPct={econ?.preserved_margin_pct ?? null}
+                explanation={econ?.pricing?.explanation ?? null}
                 retailDelta={econ?.retail_delta ?? (product.price != null ? suggested - product.price : null)}
                 onDraft={draftReprice}
                 busy={drafting}

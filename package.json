@@ -8,6 +8,7 @@
     "build:web": "npm run build -w apps/web",
     "build:ext": "npm run build -w extension",
     "lint": "npm run lint -w apps/web",
-    "typecheck": "npm run typecheck -w apps/web && npm run typecheck -w extension"
+    "typecheck": "npm run typecheck -w apps/web && npm run typecheck -w extension",
+    "test": "node --test apps/web/src/lib/*.test.ts"
   }
 }

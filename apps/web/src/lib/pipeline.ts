@@ -18,6 +18,7 @@ import {
 } from "./db";
 import { chatJSON, costUsd, PRICES_PER_M } from "./nemotron";
 import { buildRules, countryName, marketplaceFromUrl, type RuleSpec } from "./rules-catalog";
+import { pricingInputs, reprice } from "./pricing";
 import {
   CompetitorListingsSchema,
   ProductProfileSchema,
@@ -315,8 +316,6 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
   if (await alertExistsForRuleHash(rule.id, hash, account.id)) return { status: "unchanged", patch: { last_run_at: ranAt, last_hash: hash } };
 
   const settings = account.settings ?? {};
-  const unitCostPct = settings.unit_cost_pct ?? 45;
-  const marginPct = settings.target_margin_pct ?? 35;
   const today = new Date().toISOString().slice(0, 10);
 
   const sourceBlock = sources
@@ -344,8 +343,7 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
         "Never invent rates, dates, HTS codes, or thresholds. If the sources show nothing that applies to this product, return relevance no_change, empty claims, severity low, action type none.",
         "relevance affects: a requirement or change clearly applies to this product. might_affect: it plausibly applies but a detail (material, value, origin, state) is unconfirmed.",
         `Today is ${today}. Treat anything older than 18 months as background unless it is still the governing rule.`,
-        "Pricing math for reprice actions: the seller's landed cost is about " +
-          `${unitCostPct}% of the listing price and the target margin is ${marginPct}%. If a duty rises by D percentage points on landed cost, the price that keeps margin is price * (1 + D/100 * ${unitCostPct}/100). Round to the nearest 0.50 and put it in suggested_price; otherwise null.`,
+        "Report facts only, never a price: tariff_rate_change_pct is the change in the duty rate in percentage points when a source states the increase or both the old and new rate (a rise from 25% to 37.5% is 12.5); estimated_cost_change_pct only when a source gives a cost or fee figure as a percent of product value; otherwise null. The server computes any reprice from these numbers.",
         "Action types: reprice (duty or cost change), compliance_step (labeling, testing, registration, warnings), register_tax (nexus threshold crossed or rule changed), review (unclear, needs a human), none.",
         "steps: 2 to 5 concrete steps the seller can do today. headline: one sentence a seller understands, no jargon.",
         "Return JSON only.",
@@ -374,6 +372,10 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
 
   if (check.relevance === "no_change" || verified.backed === 0) return { status: "none", patch };
 
+  // The model reports facts; the price comes from pricing.ts, never from the prompt.
+  const pricingIn = pricingInputs(product, check.impact, settings);
+  const pricing = pricingIn ? reprice(pricingIn) : null;
+
   const alert: AlertRow = {
     id: newId(),
     account_id: account.id,
@@ -389,7 +391,8 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
     backed: verified.backed,
     rejected: verified.rejected,
     impact: { ...check.impact, hash },
-    action: check.action,
+    action: { ...check.action, suggested_price: pricing?.suggested_price ?? null },
+    pricing,
     sources: sourceMeta.map(({ url, title, domain }) => ({ url, title, domain })),
     dismiss_reason: null,
     created_at: ranAt,

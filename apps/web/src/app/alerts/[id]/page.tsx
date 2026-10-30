@@ -97,7 +97,7 @@ export default function AlertPage() {
   const domain = sourceDomain(alert);
   const hts = product?.profile?.hts_candidates?.[0];
   const isOpen = alert.status === "new";
-  const suggestedRaw = act?.suggested_price ?? null;
+  const suggestedRaw = econ?.suggested_price ?? null;
   // A suggestion equal to the current price is not a reprice; show the steps instead.
   const suggested = suggestedRaw != null && product?.price != null && Math.abs(suggestedRaw - product.price) < 0.005 ? null : suggestedRaw;
   const effective = fmtDate(alert.impact?.effective_date);
@@ -174,10 +174,12 @@ export default function AlertPage() {
             {act.rationale ? <p className="sr-xs">{act.rationale}</p> : null}
             {isOpen && suggested != null ? (
               <div className="sr-inset">
-                <RepriceBlock price={suggested} currency={currency} preservedPct={econ?.preserved_margin_pct ?? null} retailDelta={econ?.retail_delta ?? (product?.price != null ? suggested - product.price : null)} onDraft={() => draftReprice(suggested, currency)} busy={busy === "draft"} />
+                <RepriceBlock price={suggested} currency={currency} preservedPct={econ?.preserved_margin_pct ?? null} retailDelta={econ?.retail_delta ?? (product?.price != null ? suggested - product.price : null)} explanation={econ?.pricing?.explanation ?? null} onDraft={() => draftReprice(suggested, currency)} busy={busy === "draft"} />
               </div>
             ) : suggestedRaw != null ? (
               <p className="sr-xs sr-num">{suggested == null ? `The suggested price matches the current ${fmtMoney(suggestedRaw, currency)}, so no reprice is needed yet.` : `Suggested price was ${fmtMoney(suggestedRaw, currency)}.`}</p>
+            ) : econ?.pricing && econ.pricing.strategy === "absorb" && econ.pricing.basis !== "none" ? (
+              <p className="sr-xs">{econ.pricing.explanation}</p>
             ) : null}
             <div className="sr-row" style={{ gap: 8, flexWrap: "wrap" }}>
               {isOpen ? (

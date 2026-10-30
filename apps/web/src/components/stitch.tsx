@@ -9,7 +9,8 @@ import { usePathname } from "next/navigation";
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { timeAgo } from "@/lib/client";
 import type { AccountRow, AlertRow, ProductRow } from "@/lib/db";
-import { computeEconomics, fmtCompact, fmtMoney, fmtPct, type Economics } from "@/lib/economics";
+import { economicsFromPricing, fmtCompact, fmtMoney, fmtPct, type Economics } from "@/lib/economics";
+import { pricingForAlert } from "@/lib/pricing";
 import { FAMILY_LABEL } from "@/lib/rules-catalog";
 
 export type Tone = "critical" | "warning" | "success" | "info" | "neutral";
@@ -121,15 +122,14 @@ export function trimNumber(v: number, digits = 1): string {
   return s.replace(/\.0+$/, "");
 }
 
+// Alerts carry the PricingResult the server computed when they were raised; older
+// alerts without one are recomputed from the same facts with the same function.
 export function alertEconomics(alert: AlertRow, product: ProductRow | null | undefined, settings: Settings): Economics | null {
   if (!product || product.price == null) return null;
-  return computeEconomics({
-    price: product.price,
-    unit_cost_pct: settings?.unit_cost_pct,
-    duty_delta_pct: alert.impact?.tariff_rate_change_pct ?? null,
-    units_per_week: settings?.units_per_week,
-    suggested_price: alert.action?.suggested_price ?? null,
-  });
+  const econ = economicsFromPricing(product.price, pricingForAlert(alert, product, settings));
+  if (!econ) return null;
+  econ.duty_delta_pct = alert.impact?.tariff_rate_change_pct ?? null;
+  return econ;
 }
 
 export function weeklyDrag(econ: Economics | null): number {
@@ -292,7 +292,7 @@ export function AuditRow({ title, state, sub, children }: { title: string; state
   );
 }
 
-export function RepriceBlock({ price, currency, preservedPct, retailDelta, onDraft, busy, done }: { price: number; currency: string; preservedPct: number | null; retailDelta: number | null; onDraft: () => void; busy?: boolean; done?: boolean }) {
+export function RepriceBlock({ price, currency, preservedPct, retailDelta, explanation, onDraft, busy, done }: { price: number; currency: string; preservedPct: number | null; retailDelta: number | null; explanation?: string | null; onDraft: () => void; busy?: boolean; done?: boolean }) {
   return (
     <div className="sr-stack">
       <div className="sr-row sr-row--between sr-row--top">
@@ -314,6 +314,7 @@ export function RepriceBlock({ price, currency, preservedPct, retailDelta, onDra
           {retailDelta != null ? <p className="sr-xs sr-num">{signedMoney(retailDelta, currency)} retail</p> : null}
         </div>
       </div>
+      {explanation ? <p className="sr-xs">{explanation}</p> : null}
       <SrButton variant="primary" block onClick={onDraft} loading={busy} disabled={done}>
         {done ? "Price copied" : `Draft reprice (${fmtMoney(price, currency)})`}
       </SrButton>

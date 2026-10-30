@@ -1,7 +1,8 @@
 // Pure margin math shared by the pages. Inputs are the listing price, the
 // seller's landed-cost share of price, a duty change in percentage points,
 // and the units sold per week. Everything is an estimate the seller can tune
-// in Settings; the UI labels it as such.
+// in Settings; the UI labels it as such. All math lives in pricing.ts.
+import { pricingInputs, reprice, type PricingResult } from "./pricing";
 
 export interface Economics {
   price: number;
@@ -16,51 +17,47 @@ export interface Economics {
   suggested_price: number | null;
   retail_delta: number | null;
   preserved_margin_pct: number | null;
+  /** The deterministic result everything above was derived from. */
+  pricing: PricingResult | null;
 }
 
 export function computeEconomics(input: {
   price: number | null;
+  unit_cost?: number | null;
   unit_cost_pct?: number;
+  dutiable_share?: number | null;
   duty_delta_pct?: number | null;
+  est_cost_change_pct?: number | null;
   units_per_week?: number;
-  suggested_price?: number | null;
+  target_margin_pct?: number;
 }): Economics | null {
-  const price = input.price;
-  if (price == null || !Number.isFinite(price) || price <= 0) return null;
-  const costShare = (input.unit_cost_pct ?? 45) / 100;
-  const landed = price * costShare;
-  const margin = ((price - landed) / price) * 100;
-  const delta = input.duty_delta_pct ?? null;
-  const units = input.units_per_week ?? 20;
+  const inputs = pricingInputs(
+    { price: input.price, unit_cost: input.unit_cost ?? null, dutiable_share: input.dutiable_share ?? null },
+    { tariff_rate_change_pct: input.duty_delta_pct ?? null, estimated_cost_change_pct: input.est_cost_change_pct ?? null },
+    { unit_cost_pct: input.unit_cost_pct, units_per_week: input.units_per_week, target_margin_pct: input.target_margin_pct },
+  );
+  if (!inputs) return null;
+  return economicsFromPricing(inputs.price, reprice(inputs));
+}
 
-  let newLanded: number | null = null;
-  let newMargin: number | null = null;
-  let unitDelta: number | null = null;
-  let weekly: number | null = null;
-  if (delta != null && Number.isFinite(delta) && delta !== 0) {
-    newLanded = landed * (1 + delta / 100);
-    unitDelta = newLanded - landed;
-    newMargin = ((price - newLanded) / price) * 100;
-    weekly = -unitDelta * units;
-  }
-
-  const suggested = input.suggested_price ?? null;
-  const retailDelta = suggested != null ? suggested - price : null;
-  const preserved = suggested != null && newLanded != null ? ((suggested - newLanded) / suggested) * 100 : null;
-
+/** Adapts a stored PricingResult to the Economics shape the pages render. */
+export function economicsFromPricing(price: number, p: PricingResult | null): Economics | null {
+  if (!p || !Number.isFinite(price) || price <= 0) return null;
+  const changed = p.basis !== "none" && p.cost_delta !== 0;
   return {
     price,
-    landed_cost: landed,
-    margin_pct: margin,
-    duty_delta_pct: delta,
-    new_landed_cost: newLanded,
-    new_margin_pct: newMargin,
-    margin_shift_pct: newMargin != null ? newMargin - margin : null,
-    unit_cost_delta: unitDelta,
-    weekly_drag: weekly,
-    suggested_price: suggested,
-    retail_delta: retailDelta,
-    preserved_margin_pct: preserved,
+    landed_cost: p.old_cost,
+    margin_pct: p.old_margin_pct,
+    duty_delta_pct: null,
+    new_landed_cost: changed ? p.new_cost : null,
+    new_margin_pct: changed ? p.new_margin_pct_if_unchanged : null,
+    margin_shift_pct: changed ? p.new_margin_pct_if_unchanged - p.old_margin_pct : null,
+    unit_cost_delta: changed ? p.cost_delta : null,
+    weekly_drag: changed ? p.weekly_drag : null,
+    suggested_price: p.suggested_price,
+    retail_delta: p.suggested_delta,
+    preserved_margin_pct: p.suggested_price != null ? p.margin_at_suggested_pct : null,
+    pricing: p,
   };
 }
 

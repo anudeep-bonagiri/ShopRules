@@ -54,7 +54,6 @@ export const RuleCheckSchema = z.object({
     type: z.enum(["reprice", "compliance_step", "register_tax", "review", "none"]),
     title: z.string(),
     steps: z.array(z.string()).max(6),
-    suggested_price: z.number().nullable(),
     rationale: z.string(),
   }),
 });

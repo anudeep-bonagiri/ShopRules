@@ -1,6 +1,7 @@
 import { del, get, list, put } from "@vercel/blob";
 import type { Marketplace, ProductProfile, RuleFamily, VerifiedClaim } from "./schemas";
 import type { RuleSpec } from "./rules-catalog";
+import type { PricingResult } from "./pricing";
 
 // Server-only data layer. Each workspace (account) is one private JSON document
 // in Vercel Blob. Every write creates a new immutable version file under
@@ -60,6 +61,8 @@ export interface AlertRow {
   rejected: number;
   impact: { severity: string; effective_date: string | null; tariff_rate_change_pct: number | null; estimated_cost_change_pct: number | null; hash?: string };
   action: { type: string; title: string; steps: string[]; suggested_price: number | null; rationale: string };
+  /** Deterministic reprice math computed server-side from the alert facts (pricing.ts). Absent on alerts older than this field. */
+  pricing?: PricingResult | null;
   sources: Array<{ url: string; title: string; domain: string }>;
   dismiss_reason: string | null;
   created_at: string;

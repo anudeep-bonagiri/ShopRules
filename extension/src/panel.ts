@@ -2,6 +2,7 @@
 // Lives in a Shadow DOM host so site CSS cannot touch it, and talks to the
 // API only through the background worker.
 import { canonicalProductUrl } from "./extract";
+import { pricingInputs, reprice, type PricingResult } from "../../apps/web/src/lib/pricing";
 import type {
   AccountResponse,
   AccountSettings,
@@ -66,6 +67,7 @@ interface Economics {
   costDelta: number;
   marginAfterPct: number;
   unitsPerWeek: number;
+  pricing: PricingResult;
 }
 
 const HOST_ID = "shop-rules-host";
@@ -381,34 +383,36 @@ function topAlert(detail: ProductDetailResponse | null): Alert | null {
   return detail ? (openAlerts(detail)[0] ?? null) : null;
 }
 
+// Same math as the web app: pricing.ts is bundled from apps/web. The result stored
+// on the alert wins unless the seller typed a different unit cost in this panel.
 function economics(s: PanelState, alert: Alert | null): Economics | null {
   const price = currentPrice(s);
   if (price === null || !Number.isFinite(price) || price <= 0) return null;
-  const sharePct = num(s.unitCostPct) ?? s.settings.unit_cost_pct ?? DEFAULT_UNIT_COST_PCT;
-  const base = price * (Math.min(Math.max(sharePct, 1), 99) / 100);
+  const localShare = num(s.unitCostPct);
+  const sharePct = localShare ?? s.settings.unit_cost_pct ?? DEFAULT_UNIT_COST_PCT;
+  const inputs = pricingInputs(
+    { price },
+    alert?.impact ?? null,
+    { unit_cost_pct: Math.min(Math.max(sharePct, 1), 99), units_per_week: s.settings.units_per_week ?? DEFAULT_UNITS_PER_WEEK, target_margin_pct: s.settings.target_margin_pct ?? null },
+  );
+  if (!inputs) return null;
+  const pricing = alert?.pricing && localShare === null && Math.abs(alert.pricing.old_cost - inputs.landed_cost) < 0.5 ? alert.pricing : reprice(inputs);
   const tariff = alert?.impact?.tariff_rate_change_pct;
   const estimated = alert?.impact?.estimated_cost_change_pct;
-  let deltaKind: Economics["deltaKind"] = null;
-  let delta = 0;
-  if (typeof tariff === "number" && Number.isFinite(tariff)) {
-    deltaKind = "tariff";
-    delta = tariff;
-  } else if (typeof estimated === "number" && Number.isFinite(estimated)) {
-    deltaKind = "cost";
-    delta = estimated;
-  }
-  const landed = base * (1 + delta / 100);
+  const deltaKind: Economics["deltaKind"] = pricing.basis === "duty" ? "tariff" : pricing.basis === "cost" ? "cost" : null;
+  const delta = deltaKind === "tariff" ? (tariff ?? 0) : deltaKind === "cost" ? (estimated ?? 0) : 0;
   return {
     price,
     currency: currentCurrency(s),
-    base,
-    marginPct: ((price - base) / price) * 100,
+    base: pricing.old_cost,
+    marginPct: pricing.old_margin_pct,
     deltaKind,
     delta,
-    landed,
-    costDelta: landed - base,
-    marginAfterPct: ((price - landed) / price) * 100,
-    unitsPerWeek: s.settings.units_per_week ?? DEFAULT_UNITS_PER_WEEK,
+    landed: pricing.new_cost,
+    costDelta: pricing.cost_delta,
+    marginAfterPct: pricing.new_margin_pct_if_unchanged,
+    unitsPerWeek: inputs.units_per_week,
+    pricing,
   };
 }
 
@@ -573,13 +577,12 @@ function renderAudit(s: PanelState): string {
 function renderReprice(s: PanelState): string {
   if (s.phase !== "ready" || !s.detail) return "";
   const alert = topAlert(s.detail);
-  const suggested = alert?.action?.suggested_price;
-  if (!alert || typeof suggested !== "number" || !Number.isFinite(suggested)) return "";
+  const eco = alert ? economics(s, alert) : null;
+  const suggested = eco?.pricing.suggested_price ?? null;
+  if (!alert || !eco || suggested === null || !Number.isFinite(suggested)) return "";
   const c = currentCurrency(s);
-  const price = currentPrice(s);
-  const delta = price !== null ? suggested - price : null;
-  const eco = economics(s, alert);
-  const preserved = eco && suggested > 0 ? ((suggested - eco.landed) / suggested) * 100 : null;
+  const delta = eco.pricing.suggested_delta;
+  const preserved = eco.pricing.margin_at_suggested_pct;
   const label = s.busy === "reprice" ? "Copying..." : `Draft reprice (${money(suggested, c)})`;
   const right =
     delta !== null
@@ -588,7 +591,7 @@ function renderReprice(s: PanelState): string {
   return card(
     "Recommended reprice",
     `<div class="sr-reprice"><div><div class="sr-muted sr-small">Adjust to</div><div class="sr-reprice__big sr-num">${esc(money(suggested, c))}</div></div>${right}</div>
-    ${alert.action.rationale ? `<p class="sr-muted sr-small" style="margin-top:8px">${esc(alert.action.rationale)}</p>` : ""}
+    <p class="sr-muted sr-small" style="margin-top:8px">${esc(eco.pricing.explanation)}</p>
     <button class="sr-btn sr-btn--primary sr-btn--block" data-action="reprice" style="margin-top:10px" ${s.busy ? "disabled" : ""}>${esc(label)}</button>
     <p class="sr-muted sr-small" style="margin-top:6px">Copies the new price to your clipboard and marks this alert actioned.</p>`,
     "success",
@@ -1125,8 +1128,8 @@ export class Panel {
   private async reprice(): Promise<void> {
     const s = this.state;
     const alert = s ? topAlert(s.detail) : null;
-    const suggested = alert?.action?.suggested_price;
-    if (!s || !alert || typeof suggested !== "number" || s.busy) return;
+    const suggested = s && alert ? (economics(s, alert)?.pricing.suggested_price ?? null) : null;
+    if (!s || !alert || suggested === null || s.busy) return;
     const seq = this.seq;
     this.update({ busy: "reprice", actionError: null, notice: null });
     const text = suggested.toFixed(2);

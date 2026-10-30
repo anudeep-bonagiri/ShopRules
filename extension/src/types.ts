@@ -1,3 +1,6 @@
+import type { PricingResult } from "../../apps/web/src/lib/pricing";
+export type { PricingResult };
+
 // Types shared by the background worker, content script, panel, and popup.
 // They mirror docs/api.md. Keep them in sync with the web app.
 
@@ -96,6 +99,8 @@ export interface Alert {
   rejected: number;
   impact: AlertImpact;
   action: AlertAction;
+  /** Deterministic reprice math computed by the server from the alert facts. */
+  pricing?: PricingResult | null;
   sources: Array<{ url: string; title: string; domain: string }>;
   created_at: string;
   // Present on GET /api/alerts only.
