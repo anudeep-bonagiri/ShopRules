@@ -1,6 +1,6 @@
 // Toolbar popup: settings, connection test, alert count, and site access.
 import { send } from "./bridge";
-import type { AlertsResponse, HealthResponse, Settings } from "./types";
+import type { AccountResponse, AlertsResponse, HealthResponse, Settings } from "./types";
 
 const DEFAULT_BASE_URL = "https://shop-rules.vercel.app";
 const BUILT_IN_HOSTS = /(^|\.)(amazon\.com|etsy\.com|myshopify\.com)$/i;
@@ -66,14 +66,30 @@ async function testConnection(): Promise<void> {
   }
   const h = result.data;
   const token = tokenInput.value.trim();
-  const parts = [
-    `Connected to Shop Rules ${h.version}.`,
-    `Tavily: ${h.tavily_mode}.`,
-    `Nemotron: ${h.nemotron_configured ? "configured" : "not configured"}.`,
-  ];
-  if (!token) parts.push("Add your account token to see alerts.");
+  const parts = [`Shop Rules ${h.version} is reachable.`, `Tavily: ${h.tavily_mode}.`, `Nemotron: ${h.nemotron_configured ? "configured" : "not configured"}.`];
+  if (!token) {
+    parts.push("Add your account token to see alerts.");
+    showResult(testResult, "info", parts.join(" "));
+    setStatus("warning", "No token");
+    return;
+  }
+  // Reachable is not connected: the token has to be accepted by the workspace.
+  const account = await send<AccountResponse>({ type: "account" });
+  if (!account.ok) {
+    const rejected = account.code === "auth";
+    showResult(testResult, "error", rejected ? "Token rejected. Copy a fresh token from the Settings page and reconnect." : account.error);
+    setStatus("critical", rejected ? "Token rejected" : "Error");
+    return;
+  }
+  parts.unshift(`Connected to ${workspaceName(account.data)}.`);
   showResult(testResult, "ok", parts.join(" "));
-  setStatus(token ? "success" : "warning", token ? "Connected" : "No token");
+  setStatus("success", `Connected: ${workspaceName(account.data)}`);
+}
+
+function workspaceName(data: AccountResponse): string {
+  const a = data.account;
+  const name = (a as { name?: string | null }).name;
+  return name && name.trim() ? name.trim() : `workspace ${a.id.slice(0, 8)}`;
 }
 
 async function refreshStatus(): Promise<void> {
@@ -82,8 +98,11 @@ async function refreshStatus(): Promise<void> {
     setStatus("neutral", "Not connected");
     return;
   }
-  const result = await send<HealthResponse>({ type: "health" });
-  setStatus(result.ok ? "success" : "critical", result.ok ? "Connected" : "Unreachable");
+  const result = await send<AccountResponse>({ type: "account" });
+  if (result.ok) setStatus("success", `Connected: ${workspaceName(result.data)}`);
+  else if (result.code === "auth") setStatus("critical", "Token rejected, reconnect");
+  else if (result.code === "network") setStatus("critical", "Unreachable");
+  else setStatus("warning", "Error");
 }
 
 // Alerts

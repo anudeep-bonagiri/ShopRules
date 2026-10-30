@@ -13,6 +13,7 @@ import {
   Chip,
   ChipRow,
   EmptyCard,
+  PageError,
   FAMILY_SHORT,
   fmtShort,
   groupAlertsByProduct,
@@ -143,6 +144,8 @@ export default function WatchlistPage() {
   }, [ruleList, openAlerts]);
   const lastRun = pulse.reduce<string | null>((m, p) => (p.last && (!m || p.last > m) ? p.last : m), null);
   const pulseShown = allPulse ? pulse : pulse.slice(0, 6);
+
+  if (products.error) return <PageError title="Watchlist" subtitle="What changed for the products you sell, checked against the official source." error={products.error ?? ""} status={products.status} onRetry={() => { products.refresh(); alerts.refresh(); rules.refresh(); account.refresh(); }} />;
 
   return (
     <div className="sr-page">

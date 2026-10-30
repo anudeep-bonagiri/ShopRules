@@ -8,14 +8,15 @@ import { useState } from "react";
 import { api, timeAgo, useApi } from "@/lib/client";
 import { fmtMoney } from "@/lib/economics";
 import type { ProductRow } from "@/lib/db";
-import { EmptyCard, marketplaceLabel, ProductThumb, Skeleton, SrButton, SrCard, StatusPill } from "@/components/stitch";
+import { EmptyCard, marketplaceLabel, PageError, ProductThumb, Skeleton, SrButton, SrCard, StatusPill } from "@/components/stitch";
 
 export default function InspectorListPage() {
   const router = useRouter();
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { data, loading } = useApi<{ products: ProductRow[] }>("/api/products");
+  const list = useApi<{ products: ProductRow[] }>("/api/products");
+  const { data, loading } = list;
   const products = data?.products ?? [];
   const openTotal = products.reduce((s, p) => s + (p.open_alerts ?? 0), 0);
 
@@ -33,6 +34,8 @@ export default function InspectorListPage() {
       setBusy(false);
     }
   }
+
+  if (list.error) return <PageError title="Inspector" subtitle="Every product you watch. Tap one for its price math, open alerts, and compliance audit." error={list.error ?? ""} status={list.status} onRetry={list.refresh} />;
 
   return (
     <div className="sr-page">

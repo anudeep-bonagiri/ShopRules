@@ -28,7 +28,7 @@ import type {
 
 export type Send = <T>(message: BgRequest) => Promise<BgResult<T>>;
 
-type Phase = "loading" | "ready" | "unconfigured" | "error";
+type Phase = "loading" | "ready" | "unconfigured" | "auth" | "error";
 type Busy = "watch" | "check" | "compare" | "reprice" | null;
 type Tone = "success" | "critical" | "warning" | "info" | "neutral";
 
@@ -728,6 +728,16 @@ function renderConnect(s: PanelState): string {
   );
 }
 
+// The server rejected the saved token. Not a generic error: the fix is to reconnect.
+function renderReconnect(s: PanelState): string {
+  return card(
+    "Token rejected",
+    `<p class="sr-muted" style="margin-bottom:10px">${esc(s.error ?? "Shop Rules did not accept the saved account token.")} Open the popup, paste a fresh token from the Settings page, and try again.</p>
+    <button class="sr-btn sr-btn--primary" data-action="reconnect">Reconnect Shop Rules</button>`,
+    "critical",
+  );
+}
+
 function renderBanners(s: PanelState): string {
   const out: string[] = [];
   if (s.phase === "error" && s.error) {
@@ -744,6 +754,7 @@ function renderBanners(s: PanelState): string {
 
 function renderBody(s: PanelState): string {
   if (s.phase === "unconfigured") return renderBanners(s) + renderConnect(s);
+  if (s.phase === "auth") return renderBanners(s) + renderReconnect(s);
   return (
     renderBanners(s) +
     renderPriceBlock(s) +
@@ -972,6 +983,9 @@ export class Panel {
         this.update({ showHelp: true });
         void this.send({ type: "open-popup" });
         break;
+      case "reconnect":
+        void this.send({ type: "open-popup" });
+        break;
       default:
         break;
     }
@@ -1065,6 +1079,7 @@ export class Panel {
 
   private applyFailure(code: string, error: string): void {
     if (code === "unconfigured") this.update({ phase: "unconfigured" });
+    else if (code === "auth") this.update({ phase: "auth", error });
     else this.update({ phase: "error", error });
   }
 

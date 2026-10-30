@@ -484,6 +484,52 @@ export function EmptyCard({ title, text, children }: { title: string; text?: str
   );
 }
 
+// Honest failure: what failed and what to do. A 401 means this browser has no
+// workspace cookie or sent a bad token; everything else gets the server's message.
+export function ErrorState({ error, status, onRetry, compact }: { error: string; status?: number | null; onRetry?: () => void; compact?: boolean }) {
+  const unauthorized = status === 401 || status === 403;
+  const title = unauthorized ? "This browser is not connected to a workspace" : status === 0 ? "Shop Rules is unreachable" : status === 429 ? "Daily limit reached" : "Could not load this page";
+  return (
+    <div className={cx("sr-card sr-empty sr-empty--error", compact && "sr-empty--compact")} role="alert">
+      <div className="sr-empty__title">{title}</div>
+      <p className="sr-empty__text">
+        {unauthorized ? "Open Settings to see your workspace token, or reload to get a fresh workspace cookie. " : ""}
+        {error}
+      </p>
+      <div className="sr-empty__actions">
+        {onRetry ? (
+          <SrButton variant="primary" onClick={onRetry}>
+            Retry
+          </SrButton>
+        ) : null}
+        {unauthorized ? (
+          <NextLink className="sr-link" href="/settings">
+            Open Settings
+          </NextLink>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+export function PageError({ title, subtitle, error, status, onRetry }: { title: string; subtitle?: string; error: string; status?: number | null; onRetry?: () => void }) {
+  return (
+    <div className="sr-page">
+      <div className="sr-topline">
+        <div className="sr-grow">
+          <h1 className="sr-h1">{title}</h1>
+          {subtitle ? (
+            <p className="sr-sm" style={{ marginTop: 4 }}>
+              {subtitle}
+            </p>
+          ) : null}
+        </div>
+      </div>
+      <ErrorState error={error} status={status} onRetry={onRetry} />
+    </div>
+  );
+}
+
 export function Skeleton({ lines = 3, card = true }: { lines?: number; card?: boolean }) {
   const widths = ["62%", "88%", "44%", "76%", "58%"];
   const body = (

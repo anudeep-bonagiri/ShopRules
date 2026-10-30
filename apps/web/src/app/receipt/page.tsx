@@ -3,7 +3,7 @@
 import { DataTable } from "@shopify/polaris";
 import { timeAgo, useApi } from "@/lib/client";
 import type { RunRow } from "@/lib/db";
-import { EmptyCard, MetricCard, Skeleton, SrCard, StatusPill } from "@/components/stitch";
+import { EmptyCard, MetricCard, PageError, Skeleton, SrCard, StatusPill } from "@/components/stitch";
 
 type Receipt = {
   runs: RunRow[];
@@ -17,9 +17,12 @@ const TIERS = ["nano", "super", "ultra"] as const;
 const TIER_NAME: Record<string, string> = { nano: "Nemotron 3 Nano", super: "Nemotron 3 Super", ultra: "Nemotron 3 Ultra" };
 
 export default function ReceiptPage() {
-  const { data, loading } = useApi<Receipt>("/api/receipt");
+  const receipt = useApi<Receipt>("/api/receipt");
+  const { data, loading } = receipt;
   const t = data?.totals;
   const maxCost = Math.max(...TIERS.map((k) => data?.by_tier[k]?.cost_usd ?? 0), 0.000001);
+
+  if (receipt.error) return <PageError title="Cost receipt" subtitle="Which model did what, what it cost, and what sending every call to the largest model would have cost." error={receipt.error ?? ""} status={receipt.status} onRetry={receipt.refresh} />;
 
   return (
     <div className="sr-page">

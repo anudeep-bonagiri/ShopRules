@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { timeAgo, useApi } from "@/lib/client";
 import type { RuleRow } from "@/lib/db";
 import { FAMILY_LABEL } from "@/lib/rules-catalog";
-import { Chip, ChipRow, EmptyCard, FAMILY_SHORT, SectionHead, Skeleton, SrButton, SrCard, StatusPill } from "@/components/stitch";
+import { Chip, ChipRow, EmptyCard, FAMILY_SHORT, PageError, SectionHead, Skeleton, SrButton, SrCard, StatusPill } from "@/components/stitch";
 
 type Rule = RuleRow & { product_title: string };
 type Family = "all" | "tariff" | "tax" | "safety" | "policy";
@@ -19,7 +19,8 @@ const FAMILY_BLURB: Record<string, string> = {
 };
 
 export default function RulesPage() {
-  const { data, loading } = useApi<{ rules: Rule[] }>("/api/rules");
+  const list = useApi<{ rules: Rule[] }>("/api/rules");
+  const { data, loading } = list;
   const [family, setFamily] = useState<Family>("all");
   const rules = useMemo(() => data?.rules ?? [], [data]);
   const counts: Record<Family, number> = {
@@ -30,6 +31,8 @@ export default function RulesPage() {
     policy: rules.filter((r) => r.family === "policy").length,
   };
   const visible = (family === "all" ? rules : rules.filter((r) => r.family === family)).slice().sort((a, b) => (b.last_run_at ?? "").localeCompare(a.last_run_at ?? ""));
+
+  if (list.error) return <PageError title="Watch rules" subtitle="What Shop Rules checks, where, and how often." error={list.error ?? ""} status={list.status} onRetry={list.refresh} />;
 
   return (
     <div className="sr-page">

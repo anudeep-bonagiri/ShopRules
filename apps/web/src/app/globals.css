@@ -1502,3 +1502,11 @@ body {
     align-items: flex-start;
   }
 }
+
+/* Error states share the empty-card layout with a critical edge. */
+.sr-empty--error {
+  border-left: 3px solid var(--sr-critical);
+}
+.sr-empty--compact {
+  padding: 12px 14px;
+}
