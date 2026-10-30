@@ -1,10 +1,11 @@
 "use client";
 
-import { Badge, Banner, BlockStack, Button, Card, Checkbox, Divider, InlineGrid, InlineStack, Layout, List, Page, Text, TextField } from "@shopify/polaris";
+import { Banner, Button, Checkbox, TextField } from "@shopify/polaris";
 import { useEffect, useState } from "react";
 import { api, useApi } from "@/lib/client";
 import type { AccountRow } from "@/lib/db";
 import { STATES } from "@/lib/rules-catalog";
+import { KV, SrCard, StatusPill } from "@/components/stitch";
 
 type Health = { ok: boolean; tavily_mode: string; nemotron_configured: boolean; storage_configured: boolean; models: Record<string, string> };
 
@@ -14,27 +15,47 @@ export default function SettingsPage() {
   const [states, setStates] = useState<string[]>([]);
   const [margin, setMargin] = useState("35");
   const [unitCost, setUnitCost] = useState("45");
+  const [units, setUnits] = useState("20");
+  const [stateSales, setStateSales] = useState<Record<string, string>>({});
   const [telegram, setTelegram] = useState("");
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [origin, setOrigin] = useState("");
+
+  useEffect(() => {
+    setOrigin(window.location.origin);
+  }, []);
 
   useEffect(() => {
     if (!data) return;
-    setStates(data.account.settings.ship_to_states ?? []);
-    setMargin(String(data.account.settings.target_margin_pct ?? 35));
-    setUnitCost(String(data.account.settings.unit_cost_pct ?? 45));
+    const s = data.account.settings;
+    setStates(s.ship_to_states ?? []);
+    setMargin(String(s.target_margin_pct ?? 35));
+    setUnitCost(String(s.unit_cost_pct ?? 45));
+    setUnits(String(s.units_per_week ?? 20));
+    setStateSales(Object.fromEntries(Object.entries(s.state_sales ?? {}).map(([k, v]) => [k, String(v)])));
     setTelegram(data.account.telegram_chat_id ?? "");
   }, [data]);
 
   async function save() {
     setSaving(true);
     setError(null);
+    const sales: Record<string, number> = {};
+    for (const code of states) {
+      const raw = stateSales[code];
+      if (raw === undefined || raw === "") continue;
+      const v = Number(raw);
+      if (Number.isFinite(v) && v >= 0) sales[code] = v;
+    }
     try {
       await api("/api/account", {
         method: "PATCH",
-        json: { settings: { ship_to_states: states, target_margin_pct: Number(margin), unit_cost_pct: Number(unitCost) }, telegram_chat_id: telegram || null },
+        json: {
+          settings: { ship_to_states: states, target_margin_pct: Number(margin), unit_cost_pct: Number(unitCost), units_per_week: Number(units), state_sales: sales },
+          telegram_chat_id: telegram || null,
+        },
       });
       setNotice("Saved. New products use these ship-to states; existing products keep their rules.");
       refresh();
@@ -56,132 +77,127 @@ export default function SettingsPage() {
     }
   }
 
-  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const selected = STATES.filter((s) => states.includes(s.code));
 
   return (
-    <Page title="Settings" subtitle="Your workspace, ship-to states, pricing assumptions, and the extension token.">
-      <Layout>
-        {notice ? (
-          <Layout.Section>
-            <Banner tone="success" onDismiss={() => setNotice(null)}>
-              <p>{notice}</p>
-            </Banner>
-          </Layout.Section>
-        ) : null}
-        {error ? (
-          <Layout.Section>
-            <Banner tone="critical" onDismiss={() => setError(null)}>
-              <p>{error}</p>
-            </Banner>
-          </Layout.Section>
-        ) : null}
+    <div className="sr-page">
+      <div className="sr-topline">
+        <div className="sr-grow">
+          <h1 className="sr-h1">Settings</h1>
+          <p className="sr-sm" style={{ marginTop: 4 }}>
+            Pricing assumptions, the states you ship to, and the extension token.
+          </p>
+        </div>
+      </div>
 
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="300">
-              <Text as="h2" variant="headingMd">
-                Chrome extension
-              </Text>
-              <Text as="p" tone="subdued">
-                Install the extension from the repository (extension/dist), open its popup, and paste this URL and token. Then hover any listing on Etsy, Shopify, or Amazon and press Alt+Shift+S.
-              </Text>
-              <InlineGrid columns={{ xs: 1, md: 2 }} gap="300">
-                <TextField label="Shop Rules URL" value={origin} readOnly autoComplete="off" />
-                <TextField label="Account token" value={data?.account.token ?? ""} readOnly autoComplete="off" connectedRight={<Button onClick={copyToken}>{copied ? "Copied" : "Copy"}</Button>} />
-              </InlineGrid>
-              <Text as="p" variant="bodySm" tone="subdued">
-                The token identifies this workspace. Anyone with it can read your watch list, so treat it like a password.
-              </Text>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
+      {notice ? (
+        <Banner tone="success" onDismiss={() => setNotice(null)}>
+          <p>{notice}</p>
+        </Banner>
+      ) : null}
+      {error ? (
+        <Banner tone="critical" onDismiss={() => setError(null)}>
+          <p>{error}</p>
+        </Banner>
+      ) : null}
 
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="300">
-              <Text as="h2" variant="headingMd">
-                Ship-to states
-              </Text>
-              <Text as="p" tone="subdued" variant="bodySm">
-                Each state adds a sales-tax rule that watches the revenue site of that state for its economic nexus threshold. Pick the states where most of your orders go.
-              </Text>
-              <InlineGrid columns={{ xs: 2, sm: 3, md: 4 }} gap="100">
-                {STATES.map((s) => (
-                  <Checkbox
-                    key={s.code}
-                    label={`${s.name} (${s.code})`}
-                    checked={states.includes(s.code)}
-                    onChange={(v) => setStates((prev) => (v ? Array.from(new Set([...prev, s.code])) : prev.filter((x) => x !== s.code)))}
-                  />
-                ))}
-              </InlineGrid>
-              <Divider />
-              <Text as="h2" variant="headingMd">
-                Pricing assumptions
-              </Text>
-              <InlineGrid columns={{ xs: 1, md: 2 }} gap="300">
-                <TextField label="Landed cost as % of listing price" type="number" value={unitCost} onChange={setUnitCost} autoComplete="off" suffix="%" helpText="Used to turn a duty change into a reprice suggestion." />
-                <TextField label="Target margin" type="number" value={margin} onChange={setMargin} autoComplete="off" suffix="%" />
-              </InlineGrid>
-              <Divider />
-              <Text as="h2" variant="headingMd">
-                Telegram
-              </Text>
-              <TextField
-                label="Chat id"
-                value={telegram}
-                onChange={setTelegram}
-                autoComplete="off"
-                placeholder="123456789"
-                helpText={data?.account.telegram_configured ? "Alerts are delivered to this chat." : "Set TELEGRAM_BOT_TOKEN on the server, message your bot once, then put your chat id here."}
-              />
-              <InlineStack align="end">
-                <Button variant="primary" onClick={save} loading={saving}>
-                  Save
-                </Button>
-              </InlineStack>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
+      <div className="sr-hud">
+        <div className="sr-hud__main">
+          <SrCard className="sr-stack" style={{ order: 1 }}>
+            <div>
+              <h2 className="sr-h2">Pricing assumptions</h2>
+              <p className="sr-sm" style={{ marginTop: 4 }}>
+                These turn a duty change into margin, weekly profit drag, and a reprice suggestion. They are estimates you can tune any time.
+              </p>
+            </div>
+            <div className="sr-grid-2 sr-grid-2--always">
+              <TextField label="Landed cost, % of price" type="number" value={unitCost} onChange={setUnitCost} autoComplete="off" suffix="%" min={1} max={99} helpText="What a unit costs you, delivered." />
+              <TextField label="Target margin" type="number" value={margin} onChange={setMargin} autoComplete="off" suffix="%" min={0} max={95} helpText="The margin a reprice should protect." />
+            </div>
+            <TextField label="Units sold per week" type="number" value={units} onChange={setUnits} autoComplete="off" suffix="units" min={0} helpText="A typical product across all channels. Drives the weekly drag figure." />
+          </SrCard>
 
-        <Layout.Section variant="oneThird">
-          <Card>
-            <BlockStack gap="300">
-              <Text as="h2" variant="headingMd">
-                Status
-              </Text>
-              <List>
-                <List.Item>
-                  Web access: <Badge tone="success">{health.data?.tavily_mode === "keyed" ? "Tavily (key)" : "Tavily (keyless)"}</Badge>
-                </List.Item>
-                <List.Item>
-                  Nemotron on Token Factory: {health.data?.nemotron_configured ? <Badge tone="success">Configured</Badge> : <Badge tone="critical">Missing NEBIUS_API_KEY</Badge>}
-                </List.Item>
-                <List.Item>Storage: {health.data?.storage_configured ? <Badge tone="success">Vercel Blob</Badge> : <Badge tone="critical">Missing BLOB_READ_WRITE_TOKEN</Badge>}</List.Item>
-              </List>
-              <Divider />
-              <Text as="h3" variant="headingSm">
-                Models
-              </Text>
-              <List>
-                <List.Item>
-                  <span className="sr-mono">{health.data?.models?.nano}</span> fast calls
-                </List.Item>
-                <List.Item>
-                  <span className="sr-mono">{health.data?.models?.ultra}</span> rule decisions
-                </List.Item>
-              </List>
-              <Divider />
-              <Text as="h3" variant="headingSm">
-                Your data
-              </Text>
-              <Text as="p" variant="bodySm" tone="subdued">
-                Watch list, alerts, price history, and learned instructions live in one private document per workspace. Self-host with your own Vercel Blob or Postgres (schema in apps/web/supabase) to keep everything under your control.
-              </Text>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
-      </Layout>
-    </Page>
+          <SrCard className="sr-stack" style={{ order: 2 }}>
+            <div>
+              <h2 className="sr-h2">Ship-to states</h2>
+              <p className="sr-sm" style={{ marginTop: 4 }}>
+                Each state adds a sales-tax rule that watches that state revenue site for its nexus threshold. Pick where most of your orders go.
+              </p>
+            </div>
+            <div className="sr-states">
+              {STATES.map((s) => (
+                <Checkbox key={s.code} label={`${s.name} (${s.code})`} checked={states.includes(s.code)} onChange={(v) => setStates((prev) => (v ? Array.from(new Set([...prev, s.code])) : prev.filter((x) => x !== s.code)))} />
+              ))}
+            </div>
+            {selected.length ? (
+              <div className="sr-stack" style={{ paddingTop: 4 }}>
+                <div>
+                  <h3 className="sr-h3">Sales into each state this year</h3>
+                  <p className="sr-xs" style={{ marginTop: 2 }}>
+                    Optional. Fills the nexus bars on the Watchlist so you can see how close you are to each limit.
+                  </p>
+                </div>
+                <div className="sr-grid-2 sr-grid-2--always">
+                  {selected.map((s) => (
+                    <TextField key={s.code} label={s.name} type="number" prefix="$" value={stateSales[s.code] ?? ""} onChange={(v) => setStateSales((prev) => ({ ...prev, [s.code]: v }))} autoComplete="off" placeholder="0" min={0} />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </SrCard>
+
+          <SrCard className="sr-stack" style={{ order: 3 }}>
+            <h2 className="sr-h2">Telegram</h2>
+            <TextField
+              label="Chat id"
+              value={telegram}
+              onChange={setTelegram}
+              autoComplete="off"
+              placeholder="123456789"
+              helpText={data?.account.telegram_configured ? "Alerts are delivered to this chat." : "Set TELEGRAM_BOT_TOKEN on the server, message your bot once, then put your chat id here."}
+            />
+          </SrCard>
+
+          <div className="sr-row" style={{ order: 4, justifyContent: "flex-end" }}>
+            <Button variant="primary" onClick={save} loading={saving} disabled={!data}>
+              Save settings
+            </Button>
+          </div>
+        </div>
+
+        <div className="sr-hud__aside">
+          <SrCard className="sr-stack" style={{ order: 5 }}>
+            <div>
+              <h2 className="sr-h2">Chrome extension</h2>
+              <p className="sr-sm" style={{ marginTop: 4 }}>
+                Install it from the repository (extension/dist), open its popup, and paste this URL and token. Then hover any listing on Etsy, Shopify, or Amazon and press Alt+Shift+S.
+              </p>
+            </div>
+            <TextField label="Shop Rules URL" value={origin} readOnly autoComplete="off" />
+            <TextField label="Account token" value={data?.account.token ?? ""} readOnly autoComplete="off" connectedRight={<Button onClick={copyToken}>{copied ? "Copied" : "Copy"}</Button>} />
+            <p className="sr-xs">The token identifies this workspace. Anyone with it can read your watch list, so treat it like a password.</p>
+          </SrCard>
+
+          <SrCard style={{ order: 6 }}>
+            <h2 className="sr-h2" style={{ marginBottom: 6 }}>
+              Status
+            </h2>
+            <KV
+              rows={[
+                ["Web access", <StatusPill key="w" tone="success">{health.data?.tavily_mode === "keyed" ? "Tavily, keyed" : "Tavily, keyless"}</StatusPill>],
+                ["Models", health.data?.nemotron_configured ? <StatusPill key="m" tone="success">Nemotron ready</StatusPill> : <StatusPill key="m" tone="critical">Missing NEBIUS_API_KEY</StatusPill>],
+                ["Storage", health.data?.storage_configured ? <StatusPill key="s" tone="success">Vercel Blob</StatusPill> : <StatusPill key="s" tone="critical">Missing BLOB_READ_WRITE_TOKEN</StatusPill>],
+              ]}
+            />
+            <p className="sr-xs" style={{ marginTop: 8 }}>
+              <span className="sr-mono">{health.data?.models?.nano}</span> handles fast calls. <span className="sr-mono">{health.data?.models?.ultra}</span> makes the rule decisions.
+            </p>
+            <p className="sr-xs" style={{ marginTop: 8 }}>
+              Your watch list, alerts, price history, and standing instructions live in one private document per workspace. Self-host with your own Vercel Blob or Postgres to keep everything under your control.
+            </p>
+          </SrCard>
+        </div>
+      </div>
+    </div>
   );
 }

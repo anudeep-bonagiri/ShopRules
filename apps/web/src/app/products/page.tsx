@@ -1,28 +1,31 @@
 "use client";
 
-import { Badge, Banner, BlockStack, Button, Card, EmptyState, IndexTable, InlineStack, Layout, Page, Text, TextField } from "@shopify/polaris";
+import { Banner, Button, TextField } from "@shopify/polaris";
+import { ChevronRightIcon } from "@shopify/polaris-icons";
+import NextLink from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { api, money, timeAgo, useApi } from "@/lib/client";
-import { MarketplaceBadge } from "@/components/ui";
+import { api, timeAgo, useApi } from "@/lib/client";
+import { fmtMoney } from "@/lib/economics";
 import type { ProductRow } from "@/lib/db";
+import { EmptyCard, marketplaceLabel, ProductThumb, Skeleton, SrButton, SrCard, StatusPill } from "@/components/stitch";
 
-export default function ProductsPage() {
+export default function InspectorListPage() {
   const router = useRouter();
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { data, loading, refresh } = useApi<{ products: ProductRow[] }>("/api/products");
+  const { data, loading } = useApi<{ products: ProductRow[] }>("/api/products");
   const products = data?.products ?? [];
+  const openTotal = products.reduce((s, p) => s + (p.open_alerts ?? 0), 0);
 
   async function add() {
     if (!url.trim()) return;
     setBusy(true);
     setError(null);
     try {
-      const r = await api<{ product: ProductRow }>("/api/products", { method: "POST", json: { url } });
+      const r = await api<{ product: ProductRow }>("/api/products", { method: "POST", json: { url: url.trim() } });
       setUrl("");
-      refresh();
       router.push(`/products/${r.product.id}`);
     } catch (e) {
       setError((e as Error).message);
@@ -32,67 +35,91 @@ export default function ProductsPage() {
   }
 
   return (
-    <Page title="Products" subtitle="Everything you watch, with the rules seeded for each one.">
-      <Layout>
-        {error ? (
-          <Layout.Section>
-            <Banner tone="critical" onDismiss={() => setError(null)}>
-              <p>{error}</p>
-            </Banner>
-          </Layout.Section>
+    <div className="sr-page">
+      <div className="sr-topline">
+        <div className="sr-grow">
+          <h1 className="sr-h1">Inspector</h1>
+          <p className="sr-sm" style={{ marginTop: 4 }}>
+            Every product you watch. Tap one for its price math, open alerts, and compliance audit.
+          </p>
+        </div>
+        {data ? (
+          <StatusPill tone={openTotal > 0 ? "critical" : products.length ? "success" : "neutral"} caps={false}>
+            {products.length} product{products.length === 1 ? "" : "s"}
+            {openTotal > 0 ? `, ${openTotal} open alert${openTotal === 1 ? "" : "s"}` : ""}
+          </StatusPill>
         ) : null}
-        <Layout.Section>
-          <Card>
-            <InlineStack gap="200" blockAlign="end" wrap={false}>
-              <div style={{ flex: 1 }}>
-                <TextField label="Listing URL" value={url} onChange={setUrl} autoComplete="off" placeholder="https://www.amazon.com/dp/..." />
-              </div>
-              <Button variant="primary" onClick={add} loading={busy} disabled={!url.trim()}>
-                Watch product
-              </Button>
-            </InlineStack>
-          </Card>
-        </Layout.Section>
-        <Layout.Section>
-          <Card padding="0">
-            {!loading && products.length === 0 ? (
-              <EmptyState heading="No products yet" action={{ content: "Load demo shop", url: "/" }} image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png">
-                <p>Paste a listing URL above, or add one from the Chrome extension while you are on the page.</p>
-              </EmptyState>
-            ) : (
-              <IndexTable
-                resourceName={{ singular: "product", plural: "products" }}
-                itemCount={products.length}
-                selectable={false}
-                loading={loading}
-                headings={[{ title: "Product" }, { title: "Price" }, { title: "Open alerts" }, { title: "Origin" }, { title: "Last checked" }]}
-              >
-                {products.map((p, index) => (
-                  <IndexTable.Row id={p.id} key={p.id} position={index} onClick={() => router.push(`/products/${p.id}`)}>
-                    <IndexTable.Cell>
-                      <BlockStack gap="050">
-                        <Text as="span" variant="bodyMd" fontWeight="semibold">
-                          {p.title}
-                        </Text>
-                        <InlineStack gap="100">
-                          <MarketplaceBadge marketplace={p.marketplace} />
-                          <Text as="span" variant="bodySm" tone="subdued">
-                            {p.profile?.product_type}
-                          </Text>
-                        </InlineStack>
-                      </BlockStack>
-                    </IndexTable.Cell>
-                    <IndexTable.Cell>{money(p.price, p.currency)}</IndexTable.Cell>
-                    <IndexTable.Cell>{p.open_alerts ? <Badge tone="attention">{String(p.open_alerts)}</Badge> : <Badge>0</Badge>}</IndexTable.Cell>
-                    <IndexTable.Cell>{p.profile?.origin_country ?? "unknown"}</IndexTable.Cell>
-                    <IndexTable.Cell>{timeAgo(p.last_checked_at)}</IndexTable.Cell>
-                  </IndexTable.Row>
-                ))}
-              </IndexTable>
-            )}
-          </Card>
-        </Layout.Section>
-      </Layout>
-    </Page>
+      </div>
+
+      {error ? (
+        <Banner tone="critical" onDismiss={() => setError(null)}>
+          <p>{error}</p>
+        </Banner>
+      ) : null}
+
+      <SrCard className="sr-stack">
+        <h2 className="sr-h2">Watch a listing</h2>
+        <TextField
+          label="Listing URL"
+          labelHidden
+          value={url}
+          onChange={setUrl}
+          autoComplete="off"
+          placeholder="https://www.amazon.com/dp/..."
+          clearButton
+          onClearButtonClick={() => setUrl("")}
+          connectedRight={
+            <Button variant="primary" onClick={add} loading={busy} disabled={!url.trim()}>
+              Watch product
+            </Button>
+          }
+        />
+      </SrCard>
+
+      {loading ? (
+        <Skeleton lines={4} />
+      ) : products.length === 0 ? (
+        <EmptyCard title="No products yet" text="Paste a listing URL above, or load the demo shop from the Watchlist to see three products with live checks.">
+          <SrButton href="/">Go to Watchlist</SrButton>
+        </EmptyCard>
+      ) : (
+        <SrCard flush>
+          <div className="sr-rows">
+            {products.map((p) => (
+              <NextLink key={p.id} href={`/products/${p.id}`} className="sr-prow">
+                <ProductThumb product={p} />
+                <div className="sr-grow sr-stack" style={{ gap: 4 }}>
+                  <h3 className="sr-h3 sr-clamp2" style={{ fontSize: 14 }}>
+                    {p.title}
+                  </h3>
+                  <div className="sr-row" style={{ gap: 6 }}>
+                    <StatusPill caps={false}>{marketplaceLabel(p.marketplace)}</StatusPill>
+                    <span className="sr-xs sr-truncate">
+                      {p.profile?.product_type || p.profile?.category || "Product"}
+                      {p.last_checked_at ? `, checked ${timeAgo(p.last_checked_at)}` : ", not checked yet"}
+                    </span>
+                  </div>
+                </div>
+                <div className="sr-right sr-stack" style={{ gap: 4, alignItems: "flex-end" }}>
+                  <span className="sr-body sr-num" style={{ fontWeight: 600 }}>
+                    {fmtMoney(p.price, p.currency || "USD")}
+                  </span>
+                  {p.open_alerts ? (
+                    <StatusPill tone="critical">
+                      {p.open_alerts} open
+                    </StatusPill>
+                  ) : (
+                    <StatusPill tone={p.last_checked_at ? "success" : "neutral"}>{p.last_checked_at ? "Clear" : "Queued"}</StatusPill>
+                  )}
+                </div>
+                <span className="sr-audit__icon" style={{ color: "var(--sr-text-2)", fill: "var(--sr-text-2)" }} aria-hidden>
+                  <ChevronRightIcon />
+                </span>
+              </NextLink>
+            ))}
+          </div>
+        </SrCard>
+      )}
+    </div>
   );
 }

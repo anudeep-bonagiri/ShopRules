@@ -1,76 +1,85 @@
 "use client";
 
-import { BlockStack, Box, Card, EmptyState, InlineStack, Layout, Link, Page, Tabs, Text } from "@shopify/polaris";
-import { useState } from "react";
-import { timeAgo, useApi } from "@/lib/client";
-import { EvidenceBar, FamilyBadge, SeverityBadge, StatusBadge } from "@/components/ui";
-import type { AlertRow } from "@/lib/db";
+import { useMemo, useState } from "react";
+import { useApi } from "@/lib/client";
+import type { AccountRow, AlertRow, ProductRow } from "@/lib/db";
+import { Chip, ChipRow, EmptyCard, PriorityCard, SectionHead, Skeleton, sortAlerts, SrButton, StatusPill } from "@/components/stitch";
 
-const TABS = [
-  { id: "new", content: "Open" },
-  { id: "actioned", content: "Done" },
-  { id: "dismissed", content: "Dismissed" },
-  { id: "all", content: "All" },
+type Tab = "new" | "actioned" | "dismissed" | "all";
+const TABS: Array<{ id: Tab; label: string }> = [
+  { id: "new", label: "Open" },
+  { id: "actioned", label: "Done" },
+  { id: "dismissed", label: "Dismissed" },
+  { id: "all", label: "All" },
 ];
 
 export default function AlertsPage() {
-  const [tab, setTab] = useState(0);
-  const status = TABS[tab].id;
-  const { data, loading } = useApi<{ alerts: AlertRow[] }>(`/api/alerts?status=${status}`);
-  const alerts = data?.alerts ?? [];
+  const [tab, setTab] = useState<Tab>("new");
+  const alerts = useApi<{ alerts: AlertRow[] }>("/api/alerts?status=all");
+  const products = useApi<{ products: ProductRow[] }>("/api/products");
+  const account = useApi<{ account: AccountRow }>("/api/account");
+
+  const settings = account.data?.account.settings;
+  const productMap = useMemo(() => new Map((products.data?.products ?? []).map((p) => [p.id, p])), [products.data]);
+  const all = useMemo(() => alerts.data?.alerts ?? [], [alerts.data]);
+  const counts: Record<Tab, number> = {
+    new: all.filter((a) => a.status === "new").length,
+    actioned: all.filter((a) => a.status === "actioned").length,
+    dismissed: all.filter((a) => a.status === "dismissed").length,
+    all: all.length,
+  };
+  const list = useMemo(() => {
+    const rows = tab === "all" ? all : all.filter((a) => a.status === tab);
+    return tab === "new" ? sortAlerts(rows, productMap, settings) : [...rows].sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }, [all, tab, productMap, settings]);
+
+  const empty: Record<Tab, { title: string; text: string }> = {
+    new: { title: "No open alerts", text: "Nothing is waiting on you. Checks run on their own schedule, or open a product to run one now." },
+    actioned: { title: "Nothing marked done yet", text: "When you draft a reprice or mark an alert done, it moves here." },
+    dismissed: { title: "Nothing dismissed", text: "Dismiss an alert with a reason and Shop Rules learns a standing instruction so it does not come back." },
+    all: { title: "No alerts yet", text: "Watch a product and run a check to search the official sources for each rule." },
+  };
 
   return (
-    <Page title="Alerts" subtitle="Every alert quotes the official source. The verifier shows what it kept and what it dropped.">
-      <Layout>
-        <Layout.Section>
-          <Card padding="0">
-            <Tabs tabs={TABS} selected={tab} onSelect={setTab} />
-            <Box padding="400">
-              {loading ? (
-                <Text as="p" tone="subdued">
-                  Loading...
-                </Text>
-              ) : alerts.length === 0 ? (
-                <EmptyState heading="No alerts here" image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png">
-                  <p>Run a check from a product page to search the official sources.</p>
-                </EmptyState>
-              ) : (
-                <BlockStack gap="400">
-                  {alerts.map((a) => (
-                    <Box key={a.id} paddingBlockEnd="400" borderBlockEndWidth="025" borderColor="border">
-                      <BlockStack gap="150">
-                        <InlineStack gap="200" blockAlign="center">
-                          <StatusBadge status={a.status} />
-                          <SeverityBadge severity={a.severity} />
-                          <FamilyBadge family={a.family} />
-                          <Text as="span" variant="bodySm" tone="subdued">
-                            {a.relevance === "affects" ? "Applies to this product" : "Might apply"}
-                          </Text>
-                          <Text as="span" variant="bodySm" tone="subdued">
-                            {timeAgo(a.created_at)}
-                          </Text>
-                        </InlineStack>
-                        <Link url={`/alerts/${a.id}`} removeUnderline>
-                          <Text as="span" variant="headingSm">
-                            {a.headline}
-                          </Text>
-                        </Link>
-                        <Text as="span" variant="bodySm" tone="subdued">
-                          {a.product_title} | {a.rule_title}
-                        </Text>
-                        <EvidenceBar proposed={a.proposed} backed={a.backed} rejected={a.rejected} />
-                        <Text as="span" variant="bodySm">
-                          Next step: {a.action?.title}
-                        </Text>
-                      </BlockStack>
-                    </Box>
-                  ))}
-                </BlockStack>
-              )}
-            </Box>
-          </Card>
-        </Layout.Section>
-      </Layout>
-    </Page>
+    <div className="sr-page">
+      <div className="sr-topline">
+        <div className="sr-grow">
+          <h1 className="sr-h1">Alerts</h1>
+          <p className="sr-sm" style={{ marginTop: 4 }}>
+            Every alert quotes the official source. The verifier shows what it kept and what it dropped.
+          </p>
+        </div>
+        {alerts.data ? (
+          <StatusPill tone={counts.new > 0 ? "critical" : "success"} caps={false}>
+            {counts.new} open
+          </StatusPill>
+        ) : null}
+      </div>
+
+      <ChipRow label="Alert status">
+        {TABS.map((t) => (
+          <Chip key={t.id} active={tab === t.id} count={counts[t.id]} onClick={() => setTab(t.id)}>
+            {t.label}
+          </Chip>
+        ))}
+      </ChipRow>
+
+      <section className="sr-stack">
+        <SectionHead title={TABS.find((t) => t.id === tab)?.label ?? "Alerts"} aside={tab === "new" && list.length > 1 ? "By severity, then weekly margin drag" : undefined} />
+        {alerts.loading || products.loading ? (
+          <Skeleton lines={4} />
+        ) : list.length === 0 ? (
+          <EmptyCard title={empty[tab].title} text={empty[tab].text}>
+            <SrButton href="/products">Open Inspector</SrButton>
+          </EmptyCard>
+        ) : (
+          <div className="sr-grid-2">
+            {list.map((a) => (
+              <PriorityCard key={a.id} alert={a} product={productMap.get(a.product_id)} settings={settings} />
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
   );
 }
