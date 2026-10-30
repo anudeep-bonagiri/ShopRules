@@ -2,6 +2,7 @@ import { del, get, list, put } from "@vercel/blob";
 import type { Marketplace, ProductProfile, RuleFamily, VerifiedClaim } from "./schemas";
 import type { RuleSpec } from "./rules-catalog";
 import type { PricingResult } from "./pricing";
+import type { GuardrailIssue } from "./sanity";
 
 // Server-only data layer. Each workspace (account) is one private JSON document
 // in Vercel Blob. Every write creates a new immutable version file under
@@ -63,6 +64,8 @@ export interface AlertRow {
   action: { type: string; title: string; steps: string[]; suggested_price: number | null; rationale: string };
   /** Deterministic reprice math computed server-side from the alert facts (pricing.ts). Absent on alerts older than this field. */
   pricing?: PricingResult | null;
+  /** What the deterministic guardrails changed on the model's verdict before this alert was raised (sanity.ts). */
+  guardrails?: GuardrailIssue[];
   sources: Array<{ url: string; title: string; domain: string }>;
   dismiss_reason: string | null;
   created_at: string;

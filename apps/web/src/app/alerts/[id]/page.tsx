@@ -208,6 +208,18 @@ export default function AlertPage() {
             </div>
             <EvidenceBar proposed={alert.proposed} backed={alert.backed} rejected={alert.rejected} />
             <p className="sr-xs">Each claim comes with a quote. A claim is kept only when that quote appears in the text read from the source. Rejected claims stay visible so you can see what was dropped.</p>
+            {alert.guardrails?.length ? (
+              <div className="sr-wash sr-wash--info sr-stack sr-stack--tight" role="note">
+                <p className="sr-xs" style={{ fontWeight: 600 }}>
+                  Guardrails adjusted this verdict ({alert.guardrails.length})
+                </p>
+                {alert.guardrails.map((g, i) => (
+                  <p key={i} className="sr-xs">
+                    {g.message}
+                  </p>
+                ))}
+              </div>
+            ) : null}
             {alert.claims.length === 0 ? (
               <p className="sr-sm">No claims were proposed for this alert.</p>
             ) : (

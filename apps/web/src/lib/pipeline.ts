@@ -9,6 +9,8 @@ import {
   insertProductBundle,
   insertRun,
   insertSkill,
+  listAlerts,
+  listPrices,
   listRules,
   listSkills,
   newId,
@@ -23,6 +25,7 @@ import {
 import { chatJSON, costUsd, PRICES_PER_M } from "./nemotron";
 import { buildRules, countryName, marketplaceFromUrl, type RuleSpec } from "./rules-catalog";
 import { pricingInputs, reprice } from "./pricing";
+import { auditRuleCheck, historyContext } from "./sanity";
 import { catalogMenu, finalizeHts } from "./hts-catalog";
 import {
   ClassifierOutputSchema,
@@ -448,6 +451,43 @@ export async function runChecks(account: AccountRow, product: ProductRow, opts: 
   return { alerts: saved, checked: batch.length, skipped_unchanged: skipped, meter, errors, run_id: run.id };
 }
 
+export interface RuleCheckPromptInput {
+  product: Pick<ProductRow, "title" | "price" | "currency" | "marketplace" | "profile">;
+  rule: Pick<RuleRow, "family" | "title" | "query" | "state" | "seed_note">;
+  skills: string[];
+  /** Output of historyContext(): prior alerts for this rule and the price trend. */
+  history: string;
+  sources: Array<{ url: string; title: string; published_date?: string; text: string }>;
+  today: string;
+}
+
+// One prompt builder for the live check and for scripts/eval.mts, so the
+// accuracy numbers in docs/EVAL.md measure the prompt that actually ships.
+export function buildRuleCheckPrompt(i: RuleCheckPromptInput): { system: string; user: string } {
+  const sourceBlock = i.sources
+    .map((s, n) => `--- SOURCE ${n + 1}\nurl: ${s.url}\ntitle: ${s.title}\npublished: ${s.published_date ?? "unknown"}\ntext:\n${s.text.slice(0, 3200)}`)
+    .join("\n\n");
+  const standing = i.skills.length ? `\n\nStanding instructions from the seller (follow them):\n${i.skills.map((s) => `- ${s}`).join("\n")}` : "";
+  const history = i.history ? `\n\nHISTORY\n${i.history}` : "";
+  const system = [
+    "You are Shop Rules, a compliance and pricing analyst for one small online seller.",
+    "Decide whether the sources describe a tariff, duty, product-safety, sales-tax, or marketplace-policy requirement or change that touches THIS product.",
+    "Use only the source excerpts. Every claim must carry a quote copied verbatim from a source (a separate verifier rejects quotes that are not in the text) and the url of that source.",
+    "Stay on this product and this rule: ignore passages about other product types, other tariff headings, other countries of origin, or other states, even on the same page. Do not use anything you remember from training; if the sources do not say it, it is not a fact here.",
+    "Never invent rates, dates, HTS codes, or thresholds. If the sources show nothing that applies to this product, return relevance no_change, empty claims, severity low, action type none.",
+    "relevance affects: a requirement or change clearly applies to this product. might_affect: it plausibly applies but a detail (material, value, origin, state) is unconfirmed.",
+    `Today is ${i.today}. Treat anything older than 18 months as background unless it is still the governing rule. effective_date only when a source states the date; never today's date as a placeholder.`,
+    "Report facts only, never a price: tariff_rate_change_pct is the change in the duty rate in percentage points when a source states the increase or both the old and new rate (a rise from 25% to 37.5% is 12.5); estimated_cost_change_pct only when a source gives a cost or fee figure as a percent of product value; otherwise null. The server computes any reprice from these numbers.",
+    "Action types: reprice (duty or cost change, tariff rules only), compliance_step (labeling, testing, registration, warnings), register_tax (nexus threshold crossed or rule changed), review (unclear, needs a human), none.",
+    "If HISTORY lists an alert that already says what the sources say, return no_change; report only what is new or different from it.",
+    "severity high only for a confirmed change of 5 or more duty points or a mandatory safety or tax step with a date; medium for smaller or unconfirmed changes; low otherwise.",
+    "steps: 2 to 5 concrete steps the seller can do today. headline: one sentence a seller understands, no jargon, no dashes.",
+    "Return JSON only.",
+  ].join(" ");
+  const user = `PRODUCT\n${JSON.stringify({ title: i.product.title, price: i.product.price, currency: i.product.currency, marketplace: i.product.marketplace, origin: countryName(i.product.profile.origin_country), profile: i.product.profile }, null, 0)}\n\nWATCH RULE\n${i.rule.family} | ${i.rule.title}\nquery: ${i.rule.query}${i.rule.state ? `\nstate: ${i.rule.state}` : ""}${i.rule.seed_note ? `\nseed note: ${i.rule.seed_note}` : ""}${standing}${history}\n\nSOURCES\n${sourceBlock}`;
+  return { system, user };
+}
+
 async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow, skills: SkillRow[], meter: Meter, force: boolean): Promise<RuleOutcome> {
   const ranAt = new Date().toISOString();
   const search = await tavilySearch(
@@ -498,45 +538,40 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
   const settings = account.settings ?? {};
   const today = new Date().toISOString().slice(0, 10);
 
-  const sourceBlock = sources
-    .map((s, i) => {
-      const m = sourceMeta[i];
-      return `--- SOURCE ${i + 1}\nurl: ${s.url}\ntitle: ${m.title}\npublished: ${m.published_date ?? "unknown"}\ntext:\n${s.text.slice(0, 3200)}`;
-    })
-    .join("\n\n");
+  // What the seller was already told for this rule, and how the price moved:
+  // the model sees it so it reports only what is new, and the guardrails use it
+  // to drop repeats.
+  const [previousAlerts, priceRows] = await Promise.all([
+    listAlerts(account.id, "all", product.id).then((rows) => rows.filter((a) => a.rule_id === rule.id)),
+    listPrices(product.id, account.id).catch(() => []),
+  ]);
+  const history = historyContext(previousAlerts, priceRows.map((p) => ({ at: p.at, price: Number(p.price) })), today);
 
-  const standing = skills.length ? `\n\nStanding instructions from the seller (follow them):\n${skills.map((s) => `- ${s.text}`).join("\n")}` : "";
-  const previous = rule.last_headline ? `\n\nThe last alert for this rule said: "${rule.last_headline}". If the sources say the same thing, return no_change.` : "";
-
-  const check = await chatJSON(
+  const prompt = buildRuleCheckPrompt({
+    product,
+    rule,
+    skills: skills.map((s) => s.text),
+    history,
+    sources: sources.map((s, i) => ({ url: s.url, title: sourceMeta[i].title, published_date: sourceMeta[i].published_date, text: s.text })),
+    today,
+  });
+  const raw = await chatJSON(
     "ultra",
-    {
-      name: "rule_check",
-      purpose: `rule check ${rule.key}`,
-      schema: RuleCheckSchema,
-      maxTokens: 1600,
-      temperature: 0.1,
-      system: [
-        "You are Shop Rules, a compliance and pricing analyst for one small online seller.",
-        "Decide whether the sources describe a tariff, duty, product-safety, sales-tax, or marketplace-policy requirement or change that touches THIS product.",
-        "Use only the source excerpts. Every claim must carry a quote copied verbatim from a source (a separate verifier rejects quotes that are not in the text) and the url of that source.",
-        "Never invent rates, dates, HTS codes, or thresholds. If the sources show nothing that applies to this product, return relevance no_change, empty claims, severity low, action type none.",
-        "relevance affects: a requirement or change clearly applies to this product. might_affect: it plausibly applies but a detail (material, value, origin, state) is unconfirmed.",
-        `Today is ${today}. Treat anything older than 18 months as background unless it is still the governing rule.`,
-        "Report facts only, never a price: tariff_rate_change_pct is the change in the duty rate in percentage points when a source states the increase or both the old and new rate (a rise from 25% to 37.5% is 12.5); estimated_cost_change_pct only when a source gives a cost or fee figure as a percent of product value; otherwise null. The server computes any reprice from these numbers.",
-        "Action types: reprice (duty or cost change), compliance_step (labeling, testing, registration, warnings), register_tax (nexus threshold crossed or rule changed), review (unclear, needs a human), none.",
-        "steps: 2 to 5 concrete steps the seller can do today. headline: one sentence a seller understands, no jargon.",
-        "Return JSON only.",
-      ].join(" "),
-      user: `PRODUCT\n${JSON.stringify({ title: product.title, price: product.price, currency: product.currency, marketplace: product.marketplace, origin: countryName(product.profile.origin_country), profile: product.profile }, null, 0)}\n\nWATCH RULE\n${rule.family} | ${rule.title}\nquery: ${rule.query}${rule.state ? `\nstate: ${rule.state}` : ""}${rule.seed_note ? `\nseed note: ${rule.seed_note}` : ""}${standing}${previous}\n\nSOURCES\n${sourceBlock}`,
-    },
+    { name: "rule_check", purpose: `rule check ${rule.key}`, schema: RuleCheckSchema, maxTokens: 1600, temperature: 0.1, system: prompt.system, user: prompt.user },
     meter,
   );
 
-  const verified = verifyClaims(check.claims, sources);
-  const headline = plain(check.headline).slice(0, 240);
   // "Effective today" is the model filling a blank, not a date it read.
-  if (check.impact.effective_date === today) check.impact.effective_date = null;
+  if (raw.impact.effective_date === today) raw.impact.effective_date = null;
+  const verifiedRaw = verifyClaims(raw.claims, sources);
+
+  // Deterministic guardrails: numbers must be in the quotes, actions must fit the
+  // rule, the quotes must be about this product, and repeats are dropped.
+  const audit = auditRuleCheck({ check: raw, verified: verifiedRaw.claims, rule, product, previous: previousAlerts, today });
+  const check = audit.check;
+  const backedCount = audit.verified.filter((c) => c.backed).length;
+  const verified = { claims: audit.verified, proposed: audit.verified.length, backed: backedCount, rejected: audit.verified.length - backedCount };
+  const headline = plain(check.headline).slice(0, 240);
   check.action = {
     ...check.action,
     title: plain(check.action.title),
@@ -547,10 +582,13 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
   const patch: RuleOutcome["patch"] = {
     last_run_at: ranAt,
     last_hash: hash,
-    last_headline: check.relevance === "no_change" ? rule.last_headline : headline,
+    last_headline: audit.drop ? rule.last_headline : headline,
   };
 
-  if (check.relevance === "no_change" || verified.backed === 0) return { status: "none", patch };
+  if (audit.drop) {
+    if (audit.issues.length) console.info("[shop-rules] guardrails dropped a verdict", rule.key, audit.dropReason);
+    return { status: "none", patch };
+  }
 
   // The model reports facts; the price comes from pricing.ts, never from the prompt.
   const pricingIn = pricingInputs(product, check.impact, settings);
@@ -564,7 +602,7 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
     status: "new",
     family: rule.family,
     severity: check.impact.severity,
-    relevance: check.relevance,
+    relevance: check.relevance === "no_change" ? "might_affect" : check.relevance,
     headline,
     claims: verified.claims,
     proposed: verified.proposed,
@@ -573,6 +611,7 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
     impact: { ...check.impact, hash },
     action: { ...check.action, suggested_price: pricing?.suggested_price ?? null },
     pricing,
+    guardrails: audit.issues,
     sources: sourceMeta.map(({ url, title, domain }) => ({ url, title, domain })),
     dismiss_reason: null,
     created_at: ranAt,
