@@ -177,7 +177,7 @@ export function buildRules(profile: ProductProfile, marketplace: Marketplace, sh
       title: "ASTM F963 toy safety standard",
       query: `ASTM F963 toy safety standard update ${year} CPSC`,
       include_domains: ["cpsc.gov", "federalregister.gov"],
-      include_domains_mode: "prefer",
+      include_domains_mode: "strict",
       cadence_hours: 48,
       state: null,
       seed_note: null,
