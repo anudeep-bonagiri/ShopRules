@@ -1,0 +1,114 @@
+[
+  {
+    "id": "c01",
+    "kind": "decoy",
+    "class": "two_sentences",
+    "expected": "backed",
+    "note": "two consecutive sentences quoted together"
+  },
+  {
+    "id": "c02",
+    "kind": "planted",
+    "class": "negated_long",
+    "expected": "rejected",
+    "note": "one word inserted into a 42-word quote"
+  },
+  {
+    "id": "c03",
+    "kind": "planted",
+    "class": "wrong_source",
+    "expected": "rejected",
+    "note": "a real-looking sentence from a page that was never fetched, attributed to a fetched one"
+  },
+  {
+    "id": "c04",
+    "kind": "planted",
+    "class": "paraphrase",
+    "expected": "rejected",
+    "note": "same meaning, different words; the model wrote it, the page did not"
+  },
+  {
+    "id": "c05",
+    "kind": "planted",
+    "class": "negated_short",
+    "expected": "rejected",
+    "note": "a negation removed from an eight-word sentence"
+  },
+  {
+    "id": "c06",
+    "kind": "decoy",
+    "class": "case_and_whitespace",
+    "expected": "backed",
+    "note": "capitals, a line break and double spaces inside the quote"
+  },
+  {
+    "id": "c07",
+    "kind": "planted",
+    "class": "fabricated",
+    "expected": "rejected",
+    "note": "a sentence that appears on no fetched page"
+  },
+  {
+    "id": "c08",
+    "kind": "planted",
+    "class": "threshold_changed",
+    "expected": "rejected",
+    "note": "the dollar threshold changed"
+  },
+  {
+    "id": "c09",
+    "kind": "decoy",
+    "class": "mid_sentence_fragment",
+    "expected": "backed",
+    "note": "starts and ends mid-sentence, no capital, no period"
+  },
+  {
+    "id": "c10",
+    "kind": "decoy",
+    "class": "curly_apostrophe",
+    "expected": "backed",
+    "note": "typographic apostrophe where the page has a straight one"
+  },
+  {
+    "id": "c11",
+    "kind": "planted",
+    "class": "number_changed",
+    "expected": "rejected",
+    "note": "one figure changed inside an otherwise exact sentence"
+  },
+  {
+    "id": "c12",
+    "kind": "decoy",
+    "class": "elided_middle",
+    "expected": "backed",
+    "note": "an ellipsis drops the middle clause; both halves are on the page"
+  },
+  {
+    "id": "c13",
+    "kind": "planted",
+    "class": "stitched_same_source",
+    "expected": "rejected",
+    "note": "two non-adjacent sentences of one page joined as if contiguous"
+  },
+  {
+    "id": "c14",
+    "kind": "decoy",
+    "class": "dash_variant",
+    "expected": "backed",
+    "note": "a hyphen where the page has an en dash"
+  },
+  {
+    "id": "c15",
+    "kind": "planted",
+    "class": "number_changed_long",
+    "expected": "rejected",
+    "note": "one figure changed inside a 45-word quote, where most six-word shingles still match"
+  },
+  {
+    "id": "c16",
+    "kind": "planted",
+    "class": "stitched_two_sources",
+    "expected": "rejected",
+    "note": "the first half of one page's sentence joined to the second half of another page's"
+  }
+]

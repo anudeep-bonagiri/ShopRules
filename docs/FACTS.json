@@ -1,5 +1,5 @@
 {
-  "asOf": "2026-10-30T03:45:54Z",
+  "asOf": "2026-10-30T04:42:00Z",
   "models": {
     "nano": "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B",
     "super": "nvidia/nemotron-3-super-120b-a12b",
@@ -30,11 +30,11 @@
     "price": 34
   },
   "ingest": {
-    "ms": 21970,
+    "ms": 23603,
     "origin_country": "CN",
     "hts_top": {
       "code": "9503.00",
-      "description": "Toys, games and sports equipment; parts thereof",
+      "description": "Toys, games and sports equipment; parts thereof; and accessories thereof, games and sports equipment; parts thereof; and accessories thereof, other toys, games and sports equipment",
       "confidence": 0.95
     },
     "intended_for_children": true,
@@ -50,20 +50,20 @@
       {
         "tier": "nano",
         "prompt_tokens": 314,
-        "completion_tokens": 423,
-        "ms": 3065
+        "completion_tokens": 486,
+        "ms": 2870
       }
     ]
   },
   "check": {
-    "ms": 10710,
+    "ms": 13397,
     "rules_checked": 4,
     "unchanged": 0,
     "alerts": 4,
     "errors": [],
-    "claims_proposed": 12,
+    "claims_proposed": 11,
     "claims_backed": 10,
-    "claims_rejected": 2,
+    "claims_rejected": 1,
     "source_domains": [
       "cbp.gov",
       "federalregister.gov",
@@ -82,55 +82,55 @@
     "llm": [
       {
         "tier": "ultra",
-        "prompt_tokens": 4671,
-        "completion_tokens": 1178,
-        "ms": 4340
+        "prompt_tokens": 4500,
+        "completion_tokens": 792,
+        "ms": 3639
       },
       {
         "tier": "ultra",
-        "prompt_tokens": 3664,
-        "completion_tokens": 1279,
-        "ms": 5410
+        "prompt_tokens": 4308,
+        "completion_tokens": 1005,
+        "ms": 5088
       },
       {
         "tier": "ultra",
-        "prompt_tokens": 1264,
-        "completion_tokens": 569,
-        "ms": 2781
+        "prompt_tokens": 3665,
+        "completion_tokens": 890,
+        "ms": 3909
       },
       {
         "tier": "ultra",
-        "prompt_tokens": 4369,
-        "completion_tokens": 902,
-        "ms": 5183
+        "prompt_tokens": 1333,
+        "completion_tokens": 620,
+        "ms": 2391
       }
     ],
     "alerts_summary": [
       {
         "family": "tariff",
-        "severity": "high",
+        "severity": "medium",
         "relevance": "might_affect",
-        "headline": "New Section 301 tariffs on Chinese goods took effect July 24, 2026, your wooden stacking toy from China may face an extra 12.5% duty unless it qualifies for an exemption.",
+        "headline": "New Section 301 tariffs on Chinese goods may apply to this wooden stacking toy unless it qualifies for an exemption.",
         "action": "review",
-        "backed": 4,
-        "proposed": 4,
-        "effective_date": "2026-07-24"
+        "backed": 3,
+        "proposed": 3,
+        "effective_date": "2026-07-31"
       },
       {
         "family": "tariff",
         "severity": "medium",
         "relevance": "might_affect",
-        "headline": "Section 301 tariffs on Chinese goods may apply to this wooden stacking toy, but the exact HTS subheading and rate need confirmation.",
+        "headline": "Your wooden stacking toy from China may face Section 301 tariffs if it falls on one of the published lists; verify the HTS code and check for exclusions.",
         "action": "review",
-        "backed": 2,
+        "backed": 3,
         "proposed": 3,
-        "effective_date": "2026-07-24"
+        "effective_date": null
       },
       {
         "family": "tariff",
         "severity": "high",
         "relevance": "affects",
-        "headline": "The de minimis duty-free exemption for low-value imports from China has been suspended since May 2025, so this $34 toy now owes duty and formal entry fees on every shipment.",
+        "headline": "The de minimis duty-free exemption for low-value imports from China has been suspended, so your $34 wooden toy now incurs duties and formal entry requirements.",
         "action": "compliance_step",
         "backed": 3,
         "proposed": 3,
@@ -138,40 +138,40 @@
       },
       {
         "family": "tariff",
-        "severity": "medium",
+        "severity": "low",
         "relevance": "might_affect",
-        "headline": "The general duty rate for HTS 9503.00 (toys) is not confirmed in the provided sources; verify the exact rate before pricing.",
+        "headline": "The HTS chapter covering wooden stacking toys (9503) is confirmed in the current 2026 schedule, but the exact duty rate for this product is not shown in the provided sources.",
         "action": "review",
         "backed": 1,
         "proposed": 2,
-        "effective_date": null
+        "effective_date": "2026-10-05"
       }
     ]
   },
   "forge": {
-    "ms": 8355,
+    "ms": 11740,
     "status": "unrun",
     "iterations": 1,
-    "fact_name": "china_de_minimis_suspension_effective_date",
+    "fact_name": "indefinite_suspension_effective_date",
     "steps": [
       {
         "kind": "sources",
         "title": "Fetched 4 official pages with Tavily",
-        "ms": 993,
+        "ms": 850,
         "model": null,
         "ok": null
       },
       {
         "kind": "write",
-        "title": "Nemotron 3 Ultra wrote check.py: china_de_minimis_suspension_effective_date",
-        "ms": 2690,
+        "title": "Nemotron 3 Ultra wrote check.py: indefinite_suspension_effective_date",
+        "ms": 3829,
         "model": "ultra",
         "ok": null
       },
       {
         "kind": "tests",
-        "title": "Nemotron 3 Nano wrote 4 tests",
-        "ms": 3934,
+        "title": "Nemotron 3 Nano wrote 3 tests",
+        "ms": 6084,
         "model": "nano",
         "ok": null
       },
@@ -183,34 +183,201 @@
         "ok": false
       }
     ],
-    "code_lines": 49,
-    "test_functions": 4,
+    "code_lines": 56,
+    "test_functions": 3,
     "sandbox_note": "Sandboxes are not configured: set NEBIUS_PROJECT_ID (Token Factory project settings) next to NEBIUS_API_KEY.",
     "last_output": null,
-    "llm_cost_usd": 0.00718756,
+    "llm_cost_usd": 0.00743128,
     "tavily_calls": 2
   },
   "cost": {
-    "llm_usd": 0.025872360000000004,
-    "all_ultra_usd": 0.027334999999999998,
-    "saved_pct": 5.350795683190029,
+    "llm_usd": 0.023862480000000002,
+    "all_ultra_usd": 0.025499,
+    "saved_pct": 6.417977175575508,
     "by_tier": {
       "nano": {
         "calls": 1,
         "prompt": 314,
-        "completion": 423,
-        "ms": 3065,
-        "cost": 0.00012035999999999999
+        "completion": 486,
+        "ms": 2870,
+        "cost": 0.00013548
       },
       "ultra": {
         "calls": 4,
-        "prompt": 13968,
-        "completion": 3928,
-        "ms": 17714,
-        "cost": 0.025752000000000004
+        "prompt": 13806,
+        "completion": 3307,
+        "ms": 15027,
+        "cost": 0.023727
       }
     },
-    "forge_llm_usd": 0.00718756
+    "forge_llm_usd": 0.00743128
   },
-  "account_id": "4be128d5-9f6d-452e-99f9-02cb578b1440"
+  "verifier": {
+    "fixture_pages": 6,
+    "fixture_claims": 16,
+    "planted": 10,
+    "planted_rejected": 8,
+    "planted_backed": [
+      {
+        "id": "c02",
+        "class": "negated_long",
+        "note": "one word inserted into a 42-word quote"
+      },
+      {
+        "id": "c13",
+        "class": "stitched_same_source",
+        "note": "two non-adjacent sentences of one page joined as if contiguous"
+      }
+    ],
+    "decoys": 6,
+    "decoys_backed": 6,
+    "decoys_rejected": [],
+    "by_class": [
+      {
+        "id": "c01",
+        "kind": "decoy",
+        "class": "two_sentences",
+        "expected": "backed",
+        "backed": true,
+        "pass": true,
+        "note": "two consecutive sentences quoted together"
+      },
+      {
+        "id": "c02",
+        "kind": "planted",
+        "class": "negated_long",
+        "expected": "rejected",
+        "backed": true,
+        "pass": false,
+        "note": "one word inserted into a 42-word quote"
+      },
+      {
+        "id": "c03",
+        "kind": "planted",
+        "class": "wrong_source",
+        "expected": "rejected",
+        "backed": false,
+        "pass": true,
+        "note": "a real-looking sentence from a page that was never fetched, attributed to a fetched one"
+      },
+      {
+        "id": "c04",
+        "kind": "planted",
+        "class": "paraphrase",
+        "expected": "rejected",
+        "backed": false,
+        "pass": true,
+        "note": "same meaning, different words; the model wrote it, the page did not"
+      },
+      {
+        "id": "c05",
+        "kind": "planted",
+        "class": "negated_short",
+        "expected": "rejected",
+        "backed": false,
+        "pass": true,
+        "note": "a negation removed from an eight-word sentence"
+      },
+      {
+        "id": "c06",
+        "kind": "decoy",
+        "class": "case_and_whitespace",
+        "expected": "backed",
+        "backed": true,
+        "pass": true,
+        "note": "capitals, a line break and double spaces inside the quote"
+      },
+      {
+        "id": "c07",
+        "kind": "planted",
+        "class": "fabricated",
+        "expected": "rejected",
+        "backed": false,
+        "pass": true,
+        "note": "a sentence that appears on no fetched page"
+      },
+      {
+        "id": "c08",
+        "kind": "planted",
+        "class": "threshold_changed",
+        "expected": "rejected",
+        "backed": false,
+        "pass": true,
+        "note": "the dollar threshold changed"
+      },
+      {
+        "id": "c09",
+        "kind": "decoy",
+        "class": "mid_sentence_fragment",
+        "expected": "backed",
+        "backed": true,
+        "pass": true,
+        "note": "starts and ends mid-sentence, no capital, no period"
+      },
+      {
+        "id": "c10",
+        "kind": "decoy",
+        "class": "curly_apostrophe",
+        "expected": "backed",
+        "backed": true,
+        "pass": true,
+        "note": "typographic apostrophe where the page has a straight one"
+      },
+      {
+        "id": "c11",
+        "kind": "planted",
+        "class": "number_changed",
+        "expected": "rejected",
+        "backed": false,
+        "pass": true,
+        "note": "one figure changed inside an otherwise exact sentence"
+      },
+      {
+        "id": "c12",
+        "kind": "decoy",
+        "class": "elided_middle",
+        "expected": "backed",
+        "backed": true,
+        "pass": true,
+        "note": "an ellipsis drops the middle clause; both halves are on the page"
+      },
+      {
+        "id": "c13",
+        "kind": "planted",
+        "class": "stitched_same_source",
+        "expected": "rejected",
+        "backed": true,
+        "pass": false,
+        "note": "two non-adjacent sentences of one page joined as if contiguous"
+      },
+      {
+        "id": "c14",
+        "kind": "decoy",
+        "class": "dash_variant",
+        "expected": "backed",
+        "backed": true,
+        "pass": true,
+        "note": "a hyphen where the page has an en dash"
+      },
+      {
+        "id": "c15",
+        "kind": "planted",
+        "class": "number_changed_long",
+        "expected": "rejected",
+        "backed": false,
+        "pass": true,
+        "note": "one figure changed inside a 45-word quote, where most six-word shingles still match"
+      },
+      {
+        "id": "c16",
+        "kind": "planted",
+        "class": "stitched_two_sources",
+        "expected": "rejected",
+        "backed": false,
+        "pass": true,
+        "note": "the first half of one page's sentence joined to the second half of another page's"
+      }
+    ]
+  },
+  "account_id": "8ea36d8c-e97b-47e5-aaa6-1ec78b4da6d0"
 }

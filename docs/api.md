@@ -25,6 +25,10 @@ Returns `{ account: { id, token, telegram_configured, settings } }`. Settings: `
 ### `PATCH /api/account`
 Body: partial `{ settings, telegram_chat_id }`. Returns the updated account.
 
+### `DELETE /api/account`
+
+Deletes the workspace (products, rules, alerts, runs, skills, prices, forges) and the token. Returns `{ deleted }` and clears the cookie.
+
 ### `GET /api/lookup?url=<listing url>`
 Cheap lookup used by the extension on hover. Returns `{ watched: boolean, product: Product | null, marketplace: string, families_preview: string[] }`. Does not call Tavily or Nemotron.
 

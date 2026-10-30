@@ -50,6 +50,30 @@ Manual checks, observed:
 - NOT RUN video: no cut exists yet; `docs/VIDEO.md` is the script. The Devpost video line carries the script link until the YouTube URL exists.
 - NOT RUN cold start on a fresh clone: the measured cycle ran from this checkout; the cold-start script needs the Postgres URL in the clone's env.
 
+## 2026-10-30 (UTC): /devpost setup applied to this repo, verify rerun
+
+Scaffolded and adapted: `docs/TASKS.md` (one need per sponsor), `seed/generate.mts` plus `seed/fixtures` (deterministic verifier fixture with a hidden answer key, byte-identical on two runs), `scripts/facts.mts` now scores the verifier and writes `docs/RESULTS.md` and deletes its workspace, `scripts/honesty.py` (the honesty block and every run-of timestamp), `scripts/demo_up.sh`, `scripts/full_run.sh`, `scripts/rehearse.sh`, `docs/RUNBOOK.md`, `docs/FACTS_CONTRACT.md`, `docs/RESULTS_HISTORY.md`, CI steps for fixture determinism and the honesty diff, `DELETE /api/account`. Verifier hardened from the first fixture score: fuzzy matches must carry every number, elided quotes are checked part by part (D-13).
+
+Automated pass (`check_submission.py`, facts header 2026-10-30T04:42:00Z), observed output:
+
+- PASS allow: every entry carries a reason
+- PASS numbers: DEVPOST_FULL.md: 29 numbers, 6 allowed with a reason, 0 untraced, short counts to eyeball: ['40', '65', '29']; README.md: 17 numbers, 3 allowed with a reason, 0 untraced; VIDEO.md: 6 numbers, 1 allowed with a reason, 0 untraced, short counts to eyeball: ['65']; RUNBOOK.md: 12 numbers, 2 allowed with a reason, 0 untraced, short counts to eyeball: ['43', '65']
+- PASS live-claims: skipped: the facts files carry none of the three sentences this check reads (see FACTS_CONTRACT.md)
+- PASS facts-fresh: facts headers {'FACTS.md': '2026-10-30T04:42:00Z', 'RESULTS.md': '2026-10-30T04:42:00Z'}; every quoted timestamp matches
+- PASS dashes: none
+- PASS placeholders: none
+- PASS live-wording: 27 line(s); read each against the label on the card it describes: ['DEVPOST_FULL.md:59', 'README.md:3', 'README.md:7', 'README.md:107', 'README.md:117', 'README.md:120', 'README.md:122', 'README.md:131', 'VIDEO.md:13', 'VIDEO.md:17', 'RUNBOOK.md:4', 'RUNBOOK.md:5']
+- PASS autonomous-wording: 2 line(s); a refusal count or the word refuses must sit in the same paragraph: ['VIDEO.md:17', 'VIDEO.md:17']
+- PASS links: 4 link(s) answered
+- PASS tracks: one Sponsor line equal to the allowed list; do-not-select list present and disjoint
+- PASS identifiers: 12 backticked identifier(s) on the page, all found in .
+- PASS readme: all sections present once; every backticked path exists
+- PASS repo: PUBLIC https://github.com/anudeep-bonagiri/ShopRules
+- PASS secrets: clean
+
+Observed on the public demo with `BASE=https://shop-rules.vercel.app scripts/rehearse.sh`: health ok; fresh workspace; Load demo shop 37 s, 3 products; the toy 3 open alerts (de minimis 5/5 backed, two Section 301 alerts 3/3 backed); Run check now 14 s, 4 rules; forge 10 s, status unrun (no sandbox project id), 4 steps; receipt 6 runs; workspace deleted; 64 s in all.
+Verifier fixture: 8 of 10 planted misquotes rejected (let through: negated_long, stitched_same_source), 6 of 6 decoys accepted; both gaps are in `docs/not-built.md`.
+
 ## Tried and rejected
 
 | Tried | Why rejected | Replaced by |

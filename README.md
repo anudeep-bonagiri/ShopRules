@@ -16,7 +16,7 @@ Built for the Nebius x NVIDIA Global AI Hackathon, Personal AI track. Every deci
 2. **Seed rules.** From the profile and your ship-to states, Shop Rules creates watch rules on official domains only: CBP, USTR, the Federal Register, trade.gov and the HTS for tariffs; CPSC, FDA, FTC, FCC and OEHHA for safety; each state's revenue site for economic nexus; Seller Central, Etsy Help and Shopify Help for policy.
 3. **Watch.** On a schedule (and on demand) each rule runs Tavily Search restricted to its domains, then Tavily Extract with the rule as the query to pull the relevant chunks from the top pages. A content hash skips rules whose sources have not changed.
 4. **Decide.** Nemotron 3 Ultra reads the product profile, the rule, your standing instructions, and the source excerpts, and decides: does this touch the product, how severe, effective when, and what to do (reprice with the price that keeps your margin, a compliance step, a tax registration, or a review).
-5. **Verify.** A verifier outside the model checks every claim's quote against the extracted text. Claims whose quote is not in the source are rejected and shown as rejected. An alert only exists when at least one claim is backed.
+5. **Verify.** A verifier outside the model checks every claim's quote against the extracted text: a normalized substring match, then six-word shingles at 80 percent with every number in the quote required verbatim, and elided quotes checked part by part. Claims whose quote is not in the source are rejected and shown as rejected. An alert only exists when at least one claim is backed. The verifier is scored on a planted fixture (`seed/generate.mts`) in every facts run.
 6. **Act and learn.** Approve the step or dismiss the alert with a reason. The reason becomes a standing instruction (written by Nano) that future checks follow. A cost receipt shows which model did what and what sending everything to Ultra would have cost.
 7. **Forge a check as code.** For any rule, Rule Forge has Nemotron 3 Ultra write a short Python extractor for the one fact the rule is about, Nemotron 3 Nano write tests from the facts the verifier already backed, and a Nebius Token Factory Sandbox run them with networking off. Ultra revises on failure, up to three times. The forge page shows every step, the code, the tests, and the sandbox output.
 
@@ -103,15 +103,24 @@ apps/web/              Next.js app (Polaris UI, API routes, pipeline)
   src/lib/sandbox.ts   Token Factory Sandboxes client
   supabase/migration.sql    relational schema sketch for splitting the document later
 extension/             Chrome extension (MV3); shop-rules-extension.zip is the packaged build
-scripts/facts.mts      one measured live cycle, writes docs/FACTS.md
-docs/                  FACTS, not-built, CLAIMS_AUDIT, JUDGE_QA, DECISIONS, PROJECT_STATUS, VIDEO,
-                       DEVPOST_FULL, api, competitors (REA teardown), design (token sheet and screens),
-                       tavily-personal-ai-research (past Tavily prize winners and judge quotes)
+seed/generate.mts      deterministic verifier fixture with a hidden answer key (seed/fixtures)
+scripts/facts.mts      one measured live cycle plus the verifier self-check; writes docs/FACTS.md and RESULTS.md
+scripts/honesty.py     the honesty block in the README and RESULTS, and every "run of" timestamp
+scripts/demo_up.sh     bare clone to the judging start state; full_run.sh the measured cycle; rehearse.sh the runbook with curl
+docs/                  FACTS, RESULTS, TASKS (one need per sponsor), RUNBOOK, not-built, CLAIMS_AUDIT, JUDGE_QA,
+                       DECISIONS, PROJECT_STATUS, VIDEO, DEVPOST_FULL, FACTS_CONTRACT, api, competitors (REA teardown),
+                       design (token sheet and screens)
 ```
 
 ## What is real and what is simulated
 
-Everything on the public demo is a live call: Tavily, Nemotron on Token Factory, and the sandbox when `NEBIUS_PROJECT_ID` is set. Nothing is replayed or simulated. The "Load demo shop" button adds three listings whose page fields are supplied the way the extension supplies them; the checks it runs are real. The measured numbers are in [docs/FACTS.md](docs/FACTS.md), what is not built is in [docs/not-built.md](docs/not-built.md), and every claim this README makes is audited in [docs/CLAIMS_AUDIT.md](docs/CLAIMS_AUDIT.md).
+Everything on the public demo is a live call: Tavily, Nemotron on Token Factory, and the sandbox when `NEBIUS_PROJECT_ID` is set. Nothing is replayed or simulated.
+
+<!-- honesty:start -->
+In the measured run of 2026-10-30T04:42:00Z, every Tavily call (12 in all, keyed mode) and every Nemotron call (7 in all) was live against the APIs; nothing was replayed, recorded, or stubbed.
+The sandbox step did not run (Sandboxes are not configured: set NEBIUS_PROJECT_ID (Token Factory project settings) next to NEBIUS_API_KEY.); the forge card says the same.
+The verifier backed 10 of 11 claims on the live check and rejected 1. On the planted fixture it rejected 8 of 10 misquotes and accepted 6 of 6 decoys; the misquotes it let through are named in docs/RESULTS.md.
+<!-- honesty:end --> The "Load demo shop" button adds three listings whose page fields are supplied the way the extension supplies them; the checks it runs are real. The measured numbers are in [docs/FACTS.md](docs/FACTS.md), what is not built is in [docs/not-built.md](docs/not-built.md), and every claim this README makes is audited in [docs/CLAIMS_AUDIT.md](docs/CLAIMS_AUDIT.md).
 
 ## Not built
 

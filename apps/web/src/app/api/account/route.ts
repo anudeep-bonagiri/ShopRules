@@ -1,5 +1,5 @@
 import { currentAccount, fail, json, readJson } from "@/lib/account";
-import { updateAccount } from "@/lib/db";
+import { deleteAccount, updateAccount } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +39,21 @@ export async function PATCH(req: Request) {
     if (body.telegram_chat_id !== undefined) patch.telegram_chat_id = body.telegram_chat_id ? String(body.telegram_chat_id).slice(0, 64) : null;
     const updated = await updateAccount(account.id, patch);
     return json({ account: { ...updated, telegram_configured: Boolean(process.env.TELEGRAM_BOT_TOKEN && updated.telegram_chat_id) } });
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+
+// Removes the workspace and everything in it. The extension token stops working
+// and the cookie is cleared; the next visit starts a fresh workspace.
+export async function DELETE() {
+  try {
+    const account = await currentAccount();
+    await deleteAccount(account.id);
+    const res = json({ deleted: account.id });
+    res.headers.append("set-cookie", "sr_account=; Path=/; Max-Age=0; SameSite=Lax");
+    return res;
   } catch (err) {
     return fail(err);
   }

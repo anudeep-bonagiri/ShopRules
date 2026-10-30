@@ -1,0 +1,32 @@
+[
+  {
+    "url": "https://comptroller.fixture.invalid/remote-seller-nexus",
+    "title": "Remote seller economic nexus",
+    "text": "A remote seller must register and collect sales tax once its gross revenue from sales into the state exceeds $500,000 in the preceding twelve months. The threshold is measured on gross revenue, not on taxable sales, and includes marketplace sales. A seller that crosses the threshold on March 15 must begin collecting on the first day of the fourth month – the month in which the threshold was crossed does not count. Marketplace providers collect on behalf of their sellers. Registration is completed through the Comptroller's online portal."
+  },
+  {
+    "url": "https://cpsc.fixture.invalid/toy-safety-standard",
+    "title": "Safety standard mandating ASTM F963 for toys",
+    "text": "Toys intended for children 12 years of age or younger must comply with ASTM F963-23, which the Commission has incorporated by reference as a mandatory consumer product safety standard. Testing by a CPSC-accepted third party laboratory is required before a Children's Product Certificate is issued. Small parts that fit entirely within the test cylinder are prohibited for toys intended for children under three years. Surface coatings may not contain more than 90 parts per million of lead. Tracking labels must appear on the product and its packaging."
+  },
+  {
+    "url": "https://federal-register.fixture.invalid/2025/de-minimis-suspension",
+    "title": "Suspension of duty-free de minimis treatment for products of China",
+    "text": "Effective May 2, 2025, the duty-free de minimis exemption is suspended for merchandise that originates in China or Hong Kong. Shipments that previously entered under the $800 threshold now require formal or informal entry and payment of all applicable duties, taxes, and fees. Carriers must transmit entry data before arrival. The suspension applies regardless of the mode of transportation. A shipment valued at $34 is treated the same as one valued at $3,400."
+  },
+  {
+    "url": "https://oehha.fixture.invalid/warnings/short-form",
+    "title": "Clear and reasonable warnings",
+    "text": "A business that exposes a person to a listed chemical must provide a clear and reasonable warning before the exposure. The short-form warning may be used on products when the full warning does not fit on the label. The warning symbol is a black exclamation point inside a yellow equilateral triangle with a black outline. Businesses with fewer than 10 employees are exempt. The list is updated at least once a year."
+  },
+  {
+    "url": "https://seller-help.fixture.invalid/policy/origin-declaration",
+    "title": "Country of origin declaration for toy listings",
+    "text": "Sellers must disclose the country of origin for every listing in the toy category by the end of the month. Listings that lack an origin declaration will be hidden from search until the field is completed. Repeated omissions may result in a temporary selling restriction. The policy does not apply to digital goods. Appeals are handled through the seller support case system within 5 business days."
+  },
+  {
+    "url": "https://ustr.fixture.invalid/section-301/annex-a-2026",
+    "title": "Notice of action: additional duties on products of China",
+    "text": "An additional ad valorem duty of 12.5 percent applies to products of China classified under the subheadings listed in Annex A. The additional duty takes effect for goods entered for consumption on or after July 24, 2026. Toys of heading 9503 appear in Annex A unless an exclusion has been granted. Importers may request an exclusion through the docket within 60 days of publication. Exclusions granted under the prior action expired on December 31, 2025."
+  }
+]

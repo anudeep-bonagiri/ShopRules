@@ -1,0 +1,98 @@
+[
+  {
+    "id": "c01",
+    "claim": "Listings without an origin are hidden until the field is filled.",
+    "quote": "Sellers must disclose the country of origin for every listing in the toy category by the end of the month. Listings that lack an origin declaration will be hidden from search until the field is completed.",
+    "source_url": "https://seller-help.fixture.invalid/policy/origin-declaration"
+  },
+  {
+    "id": "c02",
+    "claim": "Third-party testing is not required before a certificate.",
+    "quote": "Toys intended for children 12 years of age or younger must comply with ASTM F963-23, which the Commission has incorporated by reference as a mandatory consumer product safety standard. Testing by a CPSC-accepted third party laboratory is not required before a Children's Product Certificate is issued.",
+    "source_url": "https://cpsc.fixture.invalid/toy-safety-standard"
+  },
+  {
+    "id": "c03",
+    "claim": "The general duty rate for wooden toys is free.",
+    "quote": "The general rate of duty for wooden toys under subheading 9503.00.00 is free, and the Column 2 rate is 70 percent.",
+    "source_url": "https://ustr.fixture.invalid/section-301/annex-a-2026"
+  },
+  {
+    "id": "c04",
+    "claim": "Low-value shipments from China lost duty-free entry on May 2, 2025.",
+    "quote": "Since May 2, 2025, low-value shipments from China no longer qualify for duty-free entry under the $800 de minimis rule.",
+    "source_url": "https://federal-register.fixture.invalid/2025/de-minimis-suspension"
+  },
+  {
+    "id": "c05",
+    "claim": "The policy applies to digital goods.",
+    "quote": "The policy does apply to digital goods.",
+    "source_url": "https://seller-help.fixture.invalid/policy/origin-declaration"
+  },
+  {
+    "id": "c06",
+    "claim": "The Section 301 action adds 12.5 percent on Annex A subheadings.",
+    "quote": "An additional AD VALOREM duty of 12.5 percent\n applies to products of China  classified under the subheadings listed in Annex A.",
+    "source_url": "https://ustr.fixture.invalid/section-301/annex-a-2026"
+  },
+  {
+    "id": "c07",
+    "claim": "Marketplaces must show the warning on the product page.",
+    "quote": "Online marketplaces must display the warning on the product page before purchase.",
+    "source_url": "https://oehha.fixture.invalid/warnings/short-form"
+  },
+  {
+    "id": "c08",
+    "claim": "The nexus threshold is $100,000.",
+    "quote": "A remote seller must register and collect sales tax once its gross revenue from sales into the state exceeds $100,000 in the preceding twelve months.",
+    "source_url": "https://comptroller.fixture.invalid/remote-seller-nexus"
+  },
+  {
+    "id": "c09",
+    "claim": "The short-form warning is allowed when the full one does not fit.",
+    "quote": "may be used on products when the full warning does not fit on the label",
+    "source_url": "https://oehha.fixture.invalid/warnings/short-form"
+  },
+  {
+    "id": "c10",
+    "claim": "A Children's Product Certificate needs third-party testing first.",
+    "quote": "Testing by a CPSC-accepted third party laboratory is required before a Children’s Product Certificate is issued.",
+    "source_url": "https://cpsc.fixture.invalid/toy-safety-standard"
+  },
+  {
+    "id": "c11",
+    "claim": "The Section 301 action adds 25 percent.",
+    "quote": "An additional ad valorem duty of 25 percent applies to products of China classified under the subheadings listed in Annex A.",
+    "source_url": "https://ustr.fixture.invalid/section-301/annex-a-2026"
+  },
+  {
+    "id": "c12",
+    "claim": "ASTM F963-23 is the mandatory toy standard.",
+    "quote": "Toys intended for children 12 years of age or younger must comply with ASTM F963-23 ... as a mandatory consumer product safety standard.",
+    "source_url": "https://cpsc.fixture.invalid/toy-safety-standard"
+  },
+  {
+    "id": "c13",
+    "claim": "The standard is mandatory and tracking labels are required.",
+    "quote": "Toys intended for children 12 years of age or younger must comply with ASTM F963-23, which the Commission has incorporated by reference as a mandatory consumer product safety standard. Tracking labels must appear on the product and its packaging.",
+    "source_url": "https://cpsc.fixture.invalid/toy-safety-standard"
+  },
+  {
+    "id": "c14",
+    "claim": "Collection starts on the first day of the fourth month after crossing.",
+    "quote": "A seller that crosses the threshold on March 15 must begin collecting on the first day of the fourth month - the month in which the threshold was crossed does not count.",
+    "source_url": "https://comptroller.fixture.invalid/remote-seller-nexus"
+  },
+  {
+    "id": "c15",
+    "claim": "Lead in surface coatings is capped at 900 parts per million.",
+    "quote": "Small parts that fit entirely within the test cylinder are prohibited for toys intended for children under three years. Surface coatings may not contain more than 900 parts per million of lead. Tracking labels must appear on the product and its packaging.",
+    "source_url": "https://cpsc.fixture.invalid/toy-safety-standard"
+  },
+  {
+    "id": "c16",
+    "claim": "De minimis ended and the duty takes effect July 24, 2026.",
+    "quote": "Effective May 2, 2025, the duty-free de minimis for consumption on or after July 24, 2026.",
+    "source_url": "https://federal-register.fixture.invalid/2025/de-minimis-suspension"
+  }
+]

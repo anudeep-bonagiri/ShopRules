@@ -1,0 +1,4 @@
+- 2026-10-30T03:04Z: first committed facts (Blob store). 12 claims proposed, 11 backed.
+- 2026-10-30T03:22Z: facts after the ingest hardening; the forge wrote 0 test functions (assertions under comment headers), fixed by a retry-then-wrap guard.
+- 2026-10-30T03:45Z: facts on the Postgres store after the Blob suspension; de minimis rule on official domains only; 4 test functions.
+- 2026-10-30 later: verifier self-check added (seed/fixtures); fuzzy matches must carry every number; elided quotes checked part by part.

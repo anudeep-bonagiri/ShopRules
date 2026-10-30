@@ -1,6 +1,6 @@
 # Shop Rules: Devpost submission, every field
 
-> Every number below is copied from `docs/FACTS.md` (run of 2026-10-30T03:45:54Z) or listed with a reason in `docs/numbers_allowed.txt`. Before the final paste: run `scripts/facts.mts` once more if the code changed, refresh the numbers marked FACTS, and replace the video line with the YouTube link.
+> Every number below is copied from `docs/FACTS.md` (run of 2026-10-30T04:42:00Z) or listed with a reason in `docs/numbers_allowed.txt`. Before the final paste: run `scripts/facts.mts` once more if the code changed, refresh the numbers marked FACTS, and replace the video line with the YouTube link.
 
 ---
 
@@ -40,7 +40,7 @@ Paste a listing URL (or press Alt+Shift+S on the listing with the Chrome extensi
 The moment, as a judge can replay it:
 
 1. Open the demo, click "Load demo shop". A wooden stacking toy made in China, a USB desk lamp with a lithium battery, and an organic cotton tee are watched; the toy's rules run. The toy gets 12 rules (4 tariff, 3 safety, 4 tax, 1 policy) (FACTS).
-2. Open the toy. The de minimis alert reads: "The de minimis duty-free exemption for low-value imports from China has been suspended since May 2025, so this $34 toy now owes duty and formal entry fees on every shipment." Its evidence counter reads 3 of 3 backed, effective 2025-05-02. Across the four tariff rules of the first check: 12 claims proposed, 10 backed, 2 rejected and shown as rejected; every source domain was a .gov site, 5 of 5 (FACTS).
+2. Open the toy. The de minimis alert reads: "The de minimis duty-free exemption for low-value imports from China has been suspended, so your $34 wooden toy now incurs duties and formal entry requirements." Its evidence counter reads 3 of 3 backed, effective 2025-05-02. Across the four tariff rules of the first check: 11 claims proposed, 10 backed, 1 rejected and shown as rejected; every source domain was a .gov site, 5 of 5 (FACTS).
 3. Click a claim. The quote is the sentence from the official notice, and the source link opens it. A rejected claim stays on the card with its label, so you can see what the model proposed and the verifier refused.
 4. Click "Forge a check". Nemotron 3 Ultra writes `check.py`, Nemotron 3 Nano writes the tests from the backed facts, a Token Factory sandbox runs them, and the forge page shows each step with its model and timing.
 5. Dismiss the Prop 65 alert with "we already print the warning". The next check carries that instruction.
@@ -52,7 +52,7 @@ In the order a check flows, each with the file that holds it:
 - **Ingest:** `ingestProduct` in `apps/web/src/lib/pipeline.ts`. Tavily Extract (`extract_depth` advanced) plus the page fields the extension scraped; a bot wall is detected and dropped, and Tavily Search by listing URL restricted to the store supplies the indexed listing when the fetch fails. Then Nemotron 3 Nano with JSON schema output into `ProductProfileSchema` in `apps/web/src/lib/schemas.ts`.
 - **Rules:** `apps/web/src/lib/rules-catalog.ts`. Families: tariff, product safety, sales tax, marketplace policy. Each rule carries its official domains, a domain mode (restrict for tariff and safety), a cadence, and a seed note that is labelled as a seed in the UI.
 - **Check:** `checkRule` in `apps/web/src/lib/pipeline.ts`. Tavily Search (`search_depth` advanced, `chunks_per_source` 3, `include_domains`, `time_range` year), Tavily Extract with the rule as the query, a content hash so unchanged sources are skipped, then Nemotron 3 Ultra with `RuleCheckSchema` and the seller's standing instructions in the prompt. Rules run three at a time; all bookkeeping lands in one write.
-- **Verifier:** `apps/web/src/lib/verifier.ts`. Normalized substring match, then six-word shingles at 80 percent. Presence only; rejected claims stay visible.
+- **Verifier:** `apps/web/src/lib/verifier.ts`. Normalized substring match, then six-word shingles at 80 percent with every number in the quote required verbatim; elided quotes are checked part by part. Presence only; rejected claims stay visible. It is scored on a planted fixture with a hidden answer key (`seed/generate.mts`) in every facts run (D-13).
 - **Rule Forge:** `apps/web/src/lib/forge.ts` and `apps/web/src/lib/sandbox.ts`. Ultra writes a deterministic `check(sources)` extractor, Nano writes `test_check.py`, a disposable Token Factory sandbox (Contree REST, networking off) runs the harness, Ultra revises on failure, up to three iterations. The forge page shows the step log, the code, the tests, and the sandbox output.
 - **Store:** `apps/web/src/lib/db.ts`. One JSON document per workspace in a Postgres row (Supabase), read in one query and written back with an optimistic version check; the Blob backend from the first day stays behind one interface for self-hosters.
 - **UI:** Next.js 14 with Shopify Polaris 13 and a token sheet derived from Polaris (`docs/design/DESIGN.md`): a Watchlist feed with one card per product, a Product Inspector, alerts with the evidence check first, a cost receipt, settings.
@@ -90,13 +90,14 @@ Rule Forge is also why a judge from the Coding and Agentic Engineering track see
 
 ### What we got wrong
 
-Rule Forge's sandbox step depends on the Token Factory project id being set on the deployment; where it is not, the forge card says "Not run" and shows the code and tests anyway (FACTS records that status for the measured run). The verifier checks that a quote exists, not that it supports the claim, so a confidently misread sentence can pass; that is why rejected claims stay visible and every source is one click away. The cost saving from routing is modest on a single cycle, 5 percent (FACTS), because the decision step on Ultra dominates; it grows with the Nano-heavy parts (classification, compare, skills) a seller uses day to day. Prices are list prices from third-party trackers until replaced with the invoice. Tax and marketplace-policy rules use prefer mode, so a non-official page can appear in their evidence; the domain is printed on every evidence line.
+Rule Forge's sandbox step depends on the Token Factory project id being set on the deployment; where it is not, the forge card says "Not run" and shows the code and tests anyway (FACTS records that status for the measured run). The verifier checks that a quote exists, not that it supports the claim, so a confidently misread sentence can pass; that is why rejected claims stay visible and every source is one click away. Scored on the planted fixture it lets 2 of 10 misquotes through: a negation inserted into a 42-word quote, and two non-adjacent sentences of one page joined as if contiguous (FACTS, `docs/RESULTS.md`). The cost saving from routing is modest on a single cycle, 6 percent (FACTS), because the decision step on Ultra dominates; it grows with the Nano-heavy parts (classification, compare, skills) a seller uses day to day. Prices are list prices from third-party trackers until replaced with the invoice. Tax and marketplace-policy rules use prefer mode, so a non-official page can appear in their evidence; the domain is printed on every evidence line.
 
 ### Accomplishments that we're proud of
 
-- 10 of 12 claims backed by the extracted source text on the first measured check, the other 2 rejected and shown, in 10.7 seconds for 4 rules, with 5 of 5 source domains on .gov (FACTS).
-- One Nemotron Nano call classified a listing into origin, HTS candidate, and the rule set in 3.1 seconds (FACTS).
-- A coding agent that produces a 49-line deterministic extractor and 4 tests for a tariff rule in 8.4 seconds (FACTS), with every step logged, and a store that survived its own outage (D-12).
+- 10 of 11 claims backed by the extracted source text on the first measured check, the other 1 rejected and shown, in 13.4 seconds for 4 rules, with 5 of 5 source domains on .gov (FACTS).
+- The verifier scored on a planted fixture with a hidden answer key: 8 of 10 planted misquotes rejected and 6 of 6 decoys accepted, with the 2 it let through named on the results page (FACTS).
+- One Nemotron Nano call classified a listing into origin, HTS candidate, and the rule set in 2.9 seconds (FACTS).
+- A coding agent that produces a 56-line deterministic extractor and 3 tests for a tariff rule in 11.7 seconds (FACTS), with every step logged, and a store that survived its own outage (D-12).
 
 ### What we learned
 

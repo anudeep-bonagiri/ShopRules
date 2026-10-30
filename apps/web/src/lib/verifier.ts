@@ -29,7 +29,26 @@ export interface SourceText {
   text: string;
 }
 
+// Figures are what a seller acts on, so a fuzzy match must still carry every
+// number of the quote verbatim ("12.5", "$800", "2026").
+function numbersOf(normalized: string): string[] {
+  return (normalized.match(/\$?\d[\d,.]*%?/g) ?? []).map((n) => n.replace(/[,.]+$/, ""));
+}
+
 export function quoteIsBacked(quote: string, sources: SourceText[]): { backed: boolean; matched_url: string | null } {
+  // An elided quote ("... ") is checked part by part, every part on one page.
+  const parts = quote
+    .split(/\s*(?:\.{3}|\u2026)\s*/)
+    .map((p) => p.trim())
+    .filter((p) => normalize(p).length >= 20);
+  if (parts.length > 1) {
+    const first = quoteIsBacked(parts[0], sources);
+    if (!first.backed) return first;
+    const same = sources.filter((s) => s.url === first.matched_url);
+    for (const part of parts.slice(1)) if (!quoteIsBacked(part, same).backed) return { backed: false, matched_url: null };
+    return first;
+  }
+
   const q = normalize(quote);
   if (q.length < 20) return { backed: false, matched_url: null };
   const normalizedSources = sources.map((s) => ({ url: s.url, text: normalize(s.text) }));
@@ -40,13 +59,15 @@ export function quoteIsBacked(quote: string, sources: SourceText[]): { backed: b
     if (s.text.includes(probe)) return { backed: true, matched_url: s.url };
   }
 
-  // Fuzzy fallback: most 6-word shingles of the quote appear in one source.
+  // Fuzzy fallback: most 6-word shingles of the quote appear in one source,
+  // and every number in the quote appears in that source.
   const qs = shingles(q);
   if (qs.length === 0) return { backed: false, matched_url: null };
+  const nums = numbersOf(q);
   for (const s of normalizedSources) {
     let hit = 0;
     for (const sh of qs) if (s.text.includes(sh)) hit += 1;
-    if (hit / qs.length >= 0.8) return { backed: true, matched_url: s.url };
+    if (hit / qs.length >= 0.8 && nums.every((n) => s.text.includes(n))) return { backed: true, matched_url: s.url };
   }
   return { backed: false, matched_url: null };
 }

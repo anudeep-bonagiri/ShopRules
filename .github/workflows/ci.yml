@@ -18,6 +18,10 @@ jobs:
         run: npm run build:ext
       - name: build web (no keys, the build must not need them)
         run: npm run build:web
+      - name: fixtures are deterministic
+        run: npx -y tsx@4.19.4 seed/generate.mts --out /tmp/fixtures > /dev/null && diff -r /tmp/fixtures seed/fixtures
+      - name: honesty block and run-of timestamps match the committed facts
+        run: python3 scripts/honesty.py && git diff --exit-code README.md docs/RESULTS.md docs/DEVPOST_FULL.md docs/VIDEO.md
   hygiene:
     runs-on: ubuntu-latest
     steps:
@@ -31,7 +35,7 @@ jobs:
       - name: no em dashes in outward prose
         run: |
           set -e
-          files="README.md extension/README.md docs/DEVPOST_FULL.md docs/VIDEO.md docs/not-built.md docs/CLAIMS_AUDIT.md docs/JUDGE_QA.md docs/DECISIONS.md docs/PROJECT_STATUS.md docs/FACTS.md docs/api.md docs/numbers_allowed.txt docs/tracks_allowed.txt"
+          files="README.md extension/README.md docs/DEVPOST_FULL.md docs/VIDEO.md docs/not-built.md docs/CLAIMS_AUDIT.md docs/JUDGE_QA.md docs/DECISIONS.md docs/PROJECT_STATUS.md docs/FACTS.md docs/api.md docs/numbers_allowed.txt docs/tracks_allowed.txt docs/RESULTS.md docs/RUNBOOK.md docs/TASKS.md docs/FACTS_CONTRACT.md docs/RESULTS_HISTORY.md"
           for f in $files; do [ -f "$f" ] || { echo "missing $f"; exit 1; }; done
           if grep -nP '\x{2014}|\x{2013}' $files; then echo "em or en dash found"; exit 1; fi
           echo "scanned $(echo $files | wc -w) files"

@@ -16,6 +16,10 @@
     "build:web": "npm run build -w apps/web",
     "build:ext": "npm run build -w extension",
     "lint": "npm run lint -w apps/web",
-    "typecheck": "npm run typecheck -w apps/web && npm run typecheck -w extension"
+    "typecheck": "npm run typecheck -w apps/web && npm run typecheck -w extension",
+    "seed": "npx -y tsx@4.19.4 seed/generate.mts",
+    "facts": "scripts/full_run.sh",
+    "demo:up": "scripts/demo_up.sh",
+    "rehearse": "scripts/rehearse.sh"
   }
 }

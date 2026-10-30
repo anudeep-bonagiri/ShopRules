@@ -15,3 +15,5 @@
 1800 | Devpost gallery image width in pixels (3:2)
 1200 | Devpost gallery image height in pixels (3:2)
 6543 | Supabase transaction pooler port named in the README environment notes
+429 | the HTTP status Tavily returns when keyless mode is rate limited (docs/RUNBOOK.md)
+3000 | the local port scripts/demo_up.sh serves on (docs/RUNBOOK.md)
