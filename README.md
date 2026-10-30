@@ -1,5 +1,7 @@
 # Shop Rules
 
+**Live demo:** https://shop-rules.vercel.app (click "Load demo shop", open a product, run a check). Chrome extension: `extension/shop-rules-extension.zip`.
+
 An always-on compliance and pricing assistant for people who sell on Etsy, Shopify, and Amazon. It watches the tariff changes, product safety rules, and state sales-tax thresholds that touch your actual products, verifies every alert against the official source text, and drafts the reprice or compliance step for you to approve.
 
 Built for the Nebius x NVIDIA Global AI Hackathon, Personal AI track. Every decision runs on NVIDIA Nemotron 3 through Nebius Token Factory, and every fact comes from the live web through Tavily.
