@@ -61,14 +61,6 @@ export function economicsFromPricing(price: number, p: PricingResult | null): Ec
   };
 }
 
-export function thresholdAmount(note: string | null | undefined): number | null {
-  if (!note) return null;
-  const m = note.match(/\$\s?([\d,]+)/);
-  if (!m) return null;
-  const n = Number(m[1].replace(/,/g, ""));
-  return Number.isFinite(n) ? n : null;
-}
-
 export function fmtMoney(v: number | null | undefined, currency = "USD", digits = 2): string {
   if (v == null || !Number.isFinite(v)) return "n/a";
   try {

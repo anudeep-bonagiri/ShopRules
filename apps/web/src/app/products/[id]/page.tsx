@@ -8,8 +8,11 @@ import { api, timeAgo, useApi } from "@/lib/client";
 import type { AccountRow, AlertRow, CheckRunRecord, CheckScope, ForgeRow, PriceRow, ProductRow, RuleRow, SkillRow } from "@/lib/db";
 import { computeEconomics, fmtMoney, fmtPct } from "@/lib/economics";
 import { countryName, FAMILY_LABEL } from "@/lib/rules-catalog";
-import { Sparkline } from "@/components/ui";
+import { PriceChart } from "@/components/PriceChart";
 import { ForgeListRow, ForgeStepper, useForgeStageTimer } from "@/components/forge";
+import { SellerFields } from "@/components/SellerFields";
+import { StandingInstructions } from "@/components/StandingInstructions";
+import { effectivePrice, effectiveProfile, fieldSource, pricingProduct } from "@/lib/product";
 import {
   AccentCard,
   alertEconomics,
@@ -205,14 +208,16 @@ export default function ProductInspectorPage() {
   }
 
   const { rules, alerts, price_history, skills } = data;
-  const profile = product.profile;
+  const profile = effectiveProfile(product);
+  const shownPrice = effectivePrice(product);
+  const pp = pricingProduct(product);
   const defaultForgeRule = rules.find((r) => r.family === "tariff") ?? rules[0] ?? null;
   const forgeList = forges.data?.forges ?? [];
   const forgePassing = forgeList.filter((f) => f.status === "passed").length;
   const currency = product.currency || settings?.currency || "USD";
   const unitCostPct = settings?.unit_cost_pct ?? 45;
   const units = settings?.units_per_week ?? 20;
-  const base = computeEconomics({ price: product.price, unit_cost_pct: unitCostPct });
+  const base = computeEconomics({ price: shownPrice, unit_cost: pp.unit_cost, unit_cost_pct: unitCostPct, dutiable_share: pp.dutiable_share, units_per_week: pp.units_per_week ?? units, target_margin_pct: settings?.target_margin_pct });
   const econ = top ? alertEconomics(top, product, settings) : null;
   const hasDuty = Boolean(econ && econ.new_margin_pct != null);
   const hts = profile?.hts_candidates?.[0];
@@ -320,13 +325,13 @@ export default function ProductInspectorPage() {
               <div>
                 <p className="sr-xs">Retail price</p>
                 <p className="sr-pricegrid__value" style={{ marginTop: 2 }}>
-                  {fmtMoney(product.price, currency)}{" "}
+                  {fmtMoney(shownPrice, currency)}{" "}
                   <span className="sr-sm" style={{ fontWeight: 400 }}>
                     {currency}
                   </span>
                 </p>
                 <p className="sr-xs" style={{ marginTop: 2 }}>
-                  From the listing
+                  {fieldSource(product, "price_override") === "product" ? `Set by you, listing shows ${fmtMoney(product.price, currency)}` : "From the listing"}
                 </p>
               </div>
               <div>
@@ -343,11 +348,22 @@ export default function ProductInspectorPage() {
               </div>
             </div>
             <p className="sr-xs">
-              Estimate: landed cost at {unitCostPct}% of price, {units} units a week.{" "}
+              {pp.unit_cost != null ? `Landed cost set for this product at ${fmtMoney(pp.unit_cost, currency)}` : `Estimate: landed cost at ${unitCostPct}% of price (workspace default)`}, {pp.units_per_week ?? units} units a week{pp.units_per_week != null ? " (set for this product)" : ""}.{" "}
               <NextLink href="/settings" className="sr-link">
-                Edit in Settings
+                Workspace defaults
               </NextLink>
             </p>
+          </SrCard>
+
+          <SrCard style={{ order: 1 }}>
+            <SellerFields
+              product={product}
+              settings={settings}
+              onSaved={(_p, note) => {
+                setNotice(note);
+                refresh();
+              }}
+            />
           </SrCard>
 
           {top ? (
@@ -596,24 +612,26 @@ export default function ProductInspectorPage() {
 
           <SrCard className="sr-stack" style={{ order: 7 }}>
             <h2 className="sr-h2">Price history</h2>
-            <Sparkline points={price_history.map((p) => ({ at: p.at, price: Number(p.price) }))} markers={alerts.map((a) => a.created_at)} />
-            <p className="sr-xs">Red lines mark alerts. Points come from the listing, the extension, and checks.</p>
+            <PriceChart
+              history={price_history}
+              currency={currency}
+              markers={[
+                ...alerts.filter((a) => a.kind !== "price").map((a) => ({ t: Date.parse(a.created_at), kind: "alert" as const, label: a.headline })),
+                ...price_history.filter((p) => p.source === "reprice").map((p) => ({ t: Date.parse(p.at), kind: "reprice" as const, label: `Repriced to ${Number(p.price).toFixed(2)}` })),
+              ]}
+              caption="Points come from the listing when added, from the extension when you visit the page, and from the daily price refresh."
+            />
           </SrCard>
 
           <SrCard className="sr-stack" style={{ order: 8 }}>
             <h2 className="sr-h2">Standing instructions</h2>
-            {skills.length === 0 ? (
-              <p className="sr-sm">Dismiss an alert with a reason and Shop Rules writes it down here, then follows it on future checks.</p>
-            ) : (
-              <div className="sr-rows">
-                {skills.map((s) => (
-                  <div key={s.id} className="sr-kv">
-                    <span>{s.scope}</span>
-                    <span style={{ textAlign: "left", color: "var(--sr-text)" }}>{s.text}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+            <StandingInstructions
+              skills={skills}
+              onChanged={(note) => {
+                setNotice(note);
+                refresh();
+              }}
+            />
           </SrCard>
 
           <div style={{ order: 9, textAlign: "center" }}>

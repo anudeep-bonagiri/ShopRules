@@ -23,14 +23,36 @@ Or use the zip: `npm run zip -w extension` writes `extension/shop-rules-extensio
 
 While developing, `npm run watch -w extension` rebuilds on save. Reload the extension in `chrome://extensions` after each change.
 
-## Configure
+## Connect
 
-1. Pin the Shop Rules icon from the puzzle-piece menu in the Chrome toolbar.
-2. Click it. Enter the Shop Rules URL (defaults to `https://shop-rules.vercel.app`; use `http://localhost:3000` when running the app locally).
-3. Paste the account token from the web app's Settings page (it starts with `sr_live_`), then click Save.
-4. Click "Test connection". The popup reports the app version, the Tavily mode (keyed or keyless), and whether Nemotron is configured.
+One click, no copy-paste:
+
+1. Open the Shop Rules web app, go to **Settings**, and click **Connect Chrome extension**. The page posts the workspace token to itself; the extension's content script (which runs on the app's own origin) relays it to the background worker, which stores it and answers. The page shows "Connected to extension", the popup badge says Connected.
+2. Fallback: click the Shop Rules icon, open **Advanced**, paste the Shop Rules URL and the token from Settings, Save, then Test connection. Connected means the token was accepted by `GET /api/account`; a wrong token shows "Token rejected".
 
 Settings sync through `chrome.storage.sync`, so they follow your Chrome profile.
+
+## What the HUD shows
+
+Hover a listing or stand on a product page and press `Alt+Shift+S`:
+
+- Header: marketplace, title, price (with where it was read from), **Watch this product** or "Watching since".
+- Stats: current price with delta since first seen and a 30-day sparkline, landed cost and margin (edit the unit cost; it is saved on the product, not in the browser), duty exposure (origin, HS heading, open duty points), weekly margin drag. All numbers come from `apps/web/src/lib/pricing.ts`.
+- Rules that touch this product, grouped Tariffs / Safety / Sales tax / Policy, with Clear / Alert / Not checked / Checking pills and **Check now** with live progress.
+- Top alert: evidence bar, impact metrics, **Draft reprice** (copies the price, marks the alert done, records a reprice point), **Dismiss with reason** (writes a standing instruction), **Open evidence**.
+- Compare: competitor median and position, cached for 24 hours per product.
+
+Price tracking: when you open a watched product's page, the extension posts the price it sees (once per product per hour). The server also refreshes prices daily without a model. Moves past your threshold (Settings, default 3%) raise a price-change alert and a notification.
+
+Shopify stores on their own domain are detected (the `Shopify` global, the checkout meta tag, or `/products/<handle>` with `/cdn/shop/` assets) and read through the public `/products/<handle>.json`, which gives the exact variant price.
+
+## Tests and stills
+
+```
+npm test                 # pure parsing helpers (and the web app's unit tests)
+npm run test:ext         # extraction against fixture pages in Chromium
+npm run shots:ext        # HUD and popup stills into docs/design/shots/ext-*.png
+```
 
 ## Shortcut
 

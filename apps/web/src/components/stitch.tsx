@@ -592,7 +592,7 @@ export function AlertRowItem({ alert, product, settings, showProduct }: { alert:
       <div className="sr-row sr-row--between" style={{ gap: 8 }}>
         <div className="sr-row sr-row--wrap" style={{ gap: 6 }}>
           {pill}
-          <span className="sr-xs">{FAMILY_SHORT[alert.family] ?? alert.family}</span>
+          <span className="sr-xs">{alert.kind === "price" ? "Price change" : (FAMILY_SHORT[alert.family] ?? alert.family)}</span>
           {showProduct && product ? <span className="sr-xs sr-truncate">{product.title}</span> : null}
         </div>
         <span className="sr-xs sr-num sr-right">{timeAgo(alert.created_at)}</span>

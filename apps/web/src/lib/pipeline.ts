@@ -10,6 +10,7 @@ import {
   insertRun,
   insertSkill,
   listAlerts,
+  reseedRules,
   listPrices,
   listRules,
   listSkills,
@@ -27,6 +28,7 @@ import { buildRules, countryName, marketplaceFromUrl, type RuleSpec } from "./ru
 import { pricingInputs, reprice } from "./pricing";
 import { auditRuleCheck, historyContext } from "./sanity";
 import { effectiveProfile, effectivePrice, pricingProduct } from "./product";
+import { guardNexusParse } from "./nexus";
 import { catalogMenu, finalizeHts } from "./hts-catalog";
 import {
   ClassifierOutputSchema,
@@ -303,6 +305,16 @@ async function ingestProductInner(
   return { product: bundle.product, rules: bundle.rules, meter, existing: bundle.existing };
 }
 
+// Rebuilds a product's rule set from its current merged profile and the
+// workspace ship-to states. Rules whose key did not change keep their schedule
+// and last finding. Used when the seller edits origin, HTS, materials, or the
+// for-children flag, and when the ship-to states change.
+export async function reseedProductRules(account: AccountRow, product: ProductRow): Promise<{ rules: RuleRow[]; added: number; removed: number; kept: number }> {
+  const states = account.settings?.ship_to_states?.length ? account.settings.ship_to_states : ["TX", "CA", "NY", "FL"];
+  const specs = buildRules(effectiveProfile(product), product.marketplace, states);
+  return reseedRules(account.id, product.id, specs);
+}
+
 // Model prose for the UI: no em or en dashes, single spaces.
 function plain(text: string): string {
   return text
@@ -365,6 +377,7 @@ export async function runChecks(account: AccountRow, product: ProductRow, opts: 
   const rules = await listRules(product.id, account.id);
   const now = Date.now();
   const selected = rules.filter((r) => {
+    if (r.paused) return false;
     if (scope === "all") return true;
     if (scope === "due") return ruleIsDue(r, now);
     return r.family === scope;
@@ -482,6 +495,7 @@ export function buildRuleCheckPrompt(i: RuleCheckPromptInput): { system: string;
     "Action types: reprice (duty or cost change, tariff rules only), compliance_step (labeling, testing, registration, warnings), register_tax (nexus threshold crossed or rule changed), review (unclear, needs a human), none.",
     "If HISTORY lists an alert that already says what the sources say, return no_change; report only what is new or different from it.",
     "severity high only for a confirmed change of 5 or more duty points or a mandatory safety or tax step with a date; medium for smaller or unconfirmed changes; low otherwise.",
+    "impact.nexus: for sales-tax rules only, the economic nexus threshold exactly as a quoted source states it: dollars (number, no commas), transactions (number) and operator (or, and) when both tests exist; null for any value the quotes do not state, and null entirely for other rule families.",
     "steps: 2 to 5 concrete steps the seller can do today. headline: one sentence a seller understands, no jargon, no dashes.",
     "Return JSON only.",
   ].join(" ");
@@ -572,6 +586,9 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
   const audit = auditRuleCheck({ check: raw, verified: verifiedRaw.claims, rule, product: view, previous: previousAlerts, sources, today });
   const check = audit.check;
   const backedCount = audit.verified.filter((c) => c.backed).length;
+  // Sales-tax rules: the parsed threshold counts only when a backed quote states the numbers.
+  const nexusGuard = rule.family === "tax" ? guardNexusParse(raw.impact.nexus, audit.verified.filter((c) => c.backed).map((c) => c.quote).join(" \n ")) : null;
+  if (nexusGuard?.reason) console.info("[shop-rules] nexus parse", rule.key, nexusGuard.reason);
   const verified = { claims: audit.verified, proposed: audit.verified.length, backed: backedCount, rejected: audit.verified.length - backedCount };
   const headline = plain(check.headline).slice(0, 240);
   check.action = {
@@ -610,7 +627,7 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
     proposed: verified.proposed,
     backed: verified.backed,
     rejected: verified.rejected,
-    impact: { ...check.impact, hash },
+    impact: { ...check.impact, nexus: nexusGuard?.parsed ?? null, nexus_verified: nexusGuard?.verified ?? false, hash },
     action: { ...check.action, suggested_price: pricing?.suggested_price ?? null },
     pricing,
     guardrails: audit.issues,

@@ -1,0 +1,16 @@
+{
+  "product": {
+    "id": 1,
+    "title": "Men's Wool Runners",
+    "body_html": "<p>Our Wool Runners are lightweight sneakers made with <strong>merino wool</strong> uppers and a sugarcane-based sole. Materials: merino wool, castor bean oil insole. Made in Vietnam.</p>",
+    "vendor": "Allbirds",
+    "product_type": "Shoes",
+    "tags": ["mens", "runners", "wool"],
+    "variants": [
+      { "id": 11, "title": "8 / Natural Grey", "price": "100.00", "available": false },
+      { "id": 12, "title": "9 / Natural Grey", "price": "100.00", "available": true }
+    ],
+    "images": [{ "src": "https://www.allbirds.com/cdn/shop/files/runners.jpg" }],
+    "image": { "src": "https://www.allbirds.com/cdn/shop/files/runners.jpg" }
+  }
+}

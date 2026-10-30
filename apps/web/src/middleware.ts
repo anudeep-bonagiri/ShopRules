@@ -34,7 +34,7 @@ export function middleware(req: NextRequest) {
     return res;
   }
   const res = NextResponse.next();
-  if (!req.cookies.get("sr_account")?.value) {
+  if (!req.nextUrl.pathname.startsWith("/open") && !req.cookies.get("sr_account")?.value) {
     res.cookies.set("sr_account", crypto.randomUUID(), {
       httpOnly: true,
       sameSite: "lax",

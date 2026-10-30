@@ -104,6 +104,10 @@ export interface Alert {
   action: AlertAction;
   /** Deterministic reprice math computed by the server from the alert facts. */
   pricing?: PricingResult | null;
+  /** rule (default) or price: raised by price tracking. */
+  kind?: "rule" | "price";
+  price_change?: { old_price: number; new_price: number; delta: number; pct: number } | null;
+  guardrails?: Array<{ code: string; severity: string; message: string }>;
   sources: Array<{ url: string; title: string; domain: string }>;
   created_at: string;
   // Present on GET /api/alerts only.
@@ -115,7 +119,7 @@ export interface PricePoint {
   at: string;
   price: number;
   currency: string | null;
-  source: "listing" | "extension" | "check";
+  source: "listing" | "extension" | "check" | "refresh" | "reprice" | string;
 }
 
 export interface Skill {
@@ -139,6 +143,8 @@ export interface AccountSettings {
   unit_cost_pct?: number;
   units_per_week?: number;
   state_sales?: Record<string, number>;
+  price_change_pct?: number;
+  dutiable_share?: number;
 }
 
 // Responses
@@ -189,7 +195,39 @@ export interface ProductDetailResponse {
 export interface CheckResponse {
   alerts: Alert[];
   checked: number;
+  skipped_unchanged?: number;
+  errors?: string[];
+  run_id?: string;
   meter?: unknown;
+}
+
+// Live progress of a check or an ingest, from GET /api/runs/[id].
+export interface RunRecord {
+  id: string;
+  kind: "check" | "ingest";
+  status: "running" | "done" | "failed";
+  total: number;
+  done: number;
+  current: string[];
+  items: Array<{ rule_id: string; title: string; family: RuleFamily; domain: string; status: "queued" | "checking" | "clear" | "unchanged" | "alert" | "error"; alert_id?: string }>;
+  steps?: Array<{ key: "read" | "classify" | "seed"; label: string; status: "queued" | "active" | "done" | "error"; detail?: string }>;
+  error?: string | null;
+}
+
+export interface RunResponse {
+  run: RunRecord;
+}
+
+export interface ProductsResponse {
+  products: Product[];
+}
+
+export interface ObserveResponse {
+  inserted: boolean;
+  reason: string;
+  previous: number | null;
+  alert: Alert | null;
+  price_history: PricePoint[];
 }
 
 export interface AlertsResponse {
@@ -200,6 +238,8 @@ export interface CompareResponse {
   listings: CompetitorListing[];
   price_position: PricePosition;
   note: string;
+  cached?: boolean;
+  cached_at?: string;
   meter?: unknown;
 }
 
@@ -220,6 +260,19 @@ export interface CompareRequest {
   price?: number;
   marketplace?: string;
   url?: string;
+  product_id?: string;
+  force?: boolean;
+}
+
+// Where each extracted field came from; the HUD says "read from page markup, verify" for weak ones.
+export type FieldSource = "api" | "json_ld" | "open_graph" | "selectors" | "card" | "text";
+export interface FieldConfidence {
+  title?: FieldSource;
+  price?: FieldSource;
+  currency?: FieldSource;
+  image?: FieldSource;
+  description?: FieldSource;
+  materials?: FieldSource;
 }
 
 // What the content script scrapes from a listing page or a product card.
@@ -231,6 +284,11 @@ export interface PageProduct {
   description: string | null;
   materials: string[] | null;
   image: string | null;
+  confidence?: FieldConfidence;
+  /** Shopify .json extras when available. */
+  vendor?: string | null;
+  product_type?: string | null;
+  tags?: string[] | null;
 }
 
 export interface Settings {
@@ -263,7 +321,13 @@ export type BgRequest =
   | { type: "alertStatus"; id: string; status: AlertStatus; reason?: string }
   | { type: "settings" }
   | { type: "open-popup" }
-  | { type: "poll" };
+  | { type: "poll" }
+  | { type: "run"; id: string }
+  | { type: "observe"; id: string; price: number; currency: string | null; confidence?: number }
+  | { type: "patchProduct"; id: string; patch: Record<string, unknown> }
+  | { type: "products" }
+  | { type: "connect"; token: string; baseUrl: string }
+  | { type: "open-url"; url: string };
 
 export interface TabMessage {
   type: "open-panel";

@@ -64,6 +64,14 @@ export const RuleCheckSchema = z.object({
     effective_date: z.string().nullable(),
     tariff_rate_change_pct: z.number().nullable(),
     estimated_cost_change_pct: z.number().nullable(),
+    /** Sales-tax rules only: the economic nexus threshold as the quote states it. null elsewhere. */
+    nexus: z
+      .object({
+        dollars: z.number().nullable(),
+        transactions: z.number().nullable(),
+        operator: z.enum(["or", "and"]).nullable(),
+      })
+      .nullable(),
   }),
   action: z.object({
     type: z.enum(["reprice", "compliance_step", "register_tax", "review", "none"]),

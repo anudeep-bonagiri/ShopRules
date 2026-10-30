@@ -256,6 +256,9 @@ export default function AlertPage() {
                 ["Effective date", effective ?? "Not stated"],
                 ["Duty change", alert.impact.tariff_rate_change_pct != null ? `${alert.impact.tariff_rate_change_pct > 0 ? "+" : ""}${alert.impact.tariff_rate_change_pct} pts` : "n/a"],
                 ["Est. cost change", alert.impact.estimated_cost_change_pct != null ? fmtPct(alert.impact.estimated_cost_change_pct, 1, true) : "n/a"],
+                ...(alert.impact.nexus && (alert.impact.nexus.dollars != null || alert.impact.nexus.transactions != null)
+                  ? [["Nexus threshold", `${[alert.impact.nexus.dollars != null ? `$${alert.impact.nexus.dollars.toLocaleString("en-US")}` : null, alert.impact.nexus.transactions != null ? `${alert.impact.nexus.transactions} transactions` : null].filter(Boolean).join(alert.impact.nexus.operator === "and" ? " and " : " or ")}${alert.impact.nexus_verified ? ", quoted from the source" : ""}`] as [string, string]]
+                  : []),
                 ["Rule", rule?.title ?? "n/a"],
               ]}
             />

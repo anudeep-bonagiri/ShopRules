@@ -16,7 +16,7 @@ function base(over: Partial<AuditInput> = {}): AuditInput {
       relevance: "affects",
       headline: "Section 301 duty on lamps from China rises from 25% to 37.5% on January 1, 2026",
       claims: [{ claim: "Duty rises 12.5 points", quote: QUOTE, source_url: "https://ustr.gov/notice" }],
-      impact: { severity: "high", effective_date: "2026-01-01", tariff_rate_change_pct: 12.5, estimated_cost_change_pct: null },
+      impact: { severity: "high", effective_date: "2026-01-01", tariff_rate_change_pct: 12.5, estimated_cost_change_pct: null, nexus: null },
       action: { type: "reprice", title: "Reprice the lamp", steps: ["Raise the price"], rationale: "Duty up" },
     },
     verified: [{ claim: "Duty rises 12.5 points", quote: QUOTE, source_url: "https://ustr.gov/notice", backed: true, matched_url: "https://ustr.gov/notice" }],
@@ -91,7 +91,7 @@ test("an alert about a different product on the same official site is dropped", 
   i.check.headline = "New crib standard takes effect";
   i.check.claims = [{ claim: "Crib standard updated", quote: q, source_url: "https://ustr.gov/x" }];
   i.verified = [{ claim: "Crib standard updated", quote: q, source_url: "https://ustr.gov/x", backed: true, matched_url: "https://ustr.gov/x" }];
-  i.check.impact = { severity: "medium", effective_date: null, tariff_rate_change_pct: null, estimated_cost_change_pct: null };
+  i.check.impact = { severity: "medium", effective_date: null, tariff_rate_change_pct: null, estimated_cost_change_pct: null, nexus: null };
   i.check.action.type = "review";
   const r = auditRuleCheck(i);
   assert.ok(r.drop);
@@ -136,7 +136,7 @@ test("a notice about another heading and origin is dropped even on the right off
   i.check.headline = "New 20% duty on products from Vietnam takes effect November 1";
   i.check.claims = [{ claim: "20 percent duty", quote: q, source_url: "https://ustr.gov/x" }];
   i.verified = [{ claim: "20 percent duty", quote: q, source_url: "https://ustr.gov/x", backed: true, matched_url: "https://ustr.gov/x" }];
-  i.check.impact = { severity: "high", effective_date: "2025-11-01", tariff_rate_change_pct: 20, estimated_cost_change_pct: null };
+  i.check.impact = { severity: "high", effective_date: "2025-11-01", tariff_rate_change_pct: 20, estimated_cost_change_pct: null, nexus: null };
   const r = auditRuleCheck(i);
   assert.ok(r.drop);
   assert.ok(r.issues.some((x) => x.code === "off_topic" && /6404|Vietnam/.test(x.message)));
@@ -150,7 +150,7 @@ test("a generic rule-subject match without the product is not enough when the ru
   i.check.relevance = "might_affect";
   i.check.claims = [{ claim: "Crib standard", quote: q, source_url: "https://www.cpsc.gov/x" }];
   i.verified = [{ claim: "Crib standard", quote: q, source_url: "https://www.cpsc.gov/x", backed: true, matched_url: "https://www.cpsc.gov/x" }];
-  i.check.impact = { severity: "medium", effective_date: "2026-03-01", tariff_rate_change_pct: null, estimated_cost_change_pct: null };
+  i.check.impact = { severity: "medium", effective_date: "2026-03-01", tariff_rate_change_pct: null, estimated_cost_change_pct: null, nexus: null };
   i.check.action.type = "review";
   i.product = { ...lamp, profile: { ...lamp.profile, category: "Toys", product_type: "stacking toy", keywords: ["wooden toy", "stacking toy", "toddler toy"], materials: ["beech wood"], hts_candidates: [{ code: "9503", description: "Toys, scale models, puzzles" }] } };
   const r = auditRuleCheck(i);
@@ -178,7 +178,7 @@ test("a universal tariff with no heading or country named is kept as unconfirmed
   i.check.headline = "A 10% duty applies to all imports from April 5, 2026";
   i.check.claims[0]!.quote = q;
   i.verified[0]!.quote = q;
-  i.check.impact = { severity: "high", effective_date: "2026-04-05", tariff_rate_change_pct: 10, estimated_cost_change_pct: null };
+  i.check.impact = { severity: "high", effective_date: "2026-04-05", tariff_rate_change_pct: 10, estimated_cost_change_pct: null, nexus: null };
   const r = auditRuleCheck(i);
   assert.equal(r.drop, false);
   assert.equal(r.check.relevance, "might_affect");

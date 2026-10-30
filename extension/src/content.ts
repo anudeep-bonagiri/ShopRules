@@ -2,14 +2,16 @@
 // highlighting on listing pages, the keyboard shortcut, and the panel.
 import { send } from "./bridge";
 import {
+  canonicalProductUrl,
   detectMarketplace,
   extractPageProduct,
+  extractPageProductAsync,
   findProductCardElement,
   isProductPage,
   productFromCard,
 } from "./extract";
 import { Panel } from "./panel";
-import type { Marketplace, PageProduct, TabMessage } from "./types";
+import type { LookupResponse, Marketplace, ObserveResponse, PageProduct, Settings, TabMessage } from "./types";
 
 declare global {
   interface Window {
@@ -137,7 +139,64 @@ function createHighlight(): Highlight {
 
 function cardToPage(card: ReturnType<typeof productFromCard>): PageProduct | null {
   if (!card) return null;
-  return { ...card, description: null, materials: null };
+  return { ...card, description: null, materials: null, confidence: { title: "card", price: card.price !== null ? "card" : undefined, image: card.image ? "card" : undefined } };
+}
+
+// Price tracking: when a watched product's page (or card) is seen, post the
+// price once per product per hour. The server decides whether it is news.
+const OBSERVE_PREFIX = "sr_obs:";
+const OBSERVE_EVERY_MS = 60 * 60 * 1000;
+
+async function observeIfWatched(page: PageProduct, marketplace: Marketplace): Promise<void> {
+  if (page.price === null || !Number.isFinite(page.price) || page.price <= 0) return;
+  const url = canonicalProductUrl(page.url, marketplace) ?? page.url;
+  const key = `${OBSERVE_PREFIX}${url}`;
+  try {
+    const stored = await chrome.storage.local.get(key);
+    const last = Number(stored[key] ?? 0);
+    if (Date.now() - last < OBSERVE_EVERY_MS) return;
+    const lookup = await send<LookupResponse>({ type: "lookup", url });
+    if (!lookup.ok || !lookup.data.watched || !lookup.data.product) return;
+    const confidence = page.confidence?.price === "api" || page.confidence?.price === "json_ld" ? 0.98 : page.confidence?.price === "open_graph" ? 0.9 : page.confidence?.price === "card" ? 0.7 : 0.75;
+    await send<ObserveResponse>({ type: "observe", id: lookup.data.product.id, price: page.price, currency: page.currency, confidence });
+    await chrome.storage.local.set({ [key]: Date.now() });
+  } catch {
+    // Extension reloaded or storage unavailable; the daily refresh covers it.
+  }
+}
+
+// On the app's own origin the content script is only a relay for the connect
+// handshake: Settings posts {type:"sr-connect", token, baseUrl}; we hand it to
+// the background worker and answer {type:"sr-connected"}.
+async function appOrigin(): Promise<string | null> {
+  const settings = await send<Settings>({ type: "settings" });
+  try {
+    return settings.ok ? new URL(settings.data.baseUrl).origin : null;
+  } catch {
+    return null;
+  }
+}
+
+function isAppPage(): boolean {
+  const host = location.hostname;
+  return host === "shop-rules.vercel.app" || host === "localhost" || host.endsWith(".vercel.app");
+}
+
+function bootRelay(): void {
+  const origin = location.origin;
+  window.addEventListener("message", (event) => {
+    if (event.origin !== origin || !event.data || typeof event.data !== "object") return;
+    const data = event.data as { type?: string; token?: string; baseUrl?: string };
+    if (data.type === "sr-ping") {
+      window.postMessage({ type: "sr-extension-ready" }, origin);
+      return;
+    }
+    if (data.type !== "sr-connect" || typeof data.token !== "string") return;
+    void send<{ connected: boolean }>({ type: "connect", token: data.token, baseUrl: typeof data.baseUrl === "string" ? data.baseUrl : origin }).then((r) => {
+      window.postMessage({ type: "sr-connected", ok: r.ok, error: r.ok ? null : r.error }, origin);
+    });
+  });
+  window.postMessage({ type: "sr-extension-ready" }, origin);
 }
 
 function isShortcut(event: KeyboardEvent): boolean {
@@ -145,6 +204,19 @@ function isShortcut(event: KeyboardEvent): boolean {
 }
 
 function boot(): void {
+  if (isAppPage()) {
+    bootRelay();
+    // A Shopify store could in theory live on a vercel.app domain; keep going only when the app origin is not this one.
+    void appOrigin().then((o) => {
+      if (o === location.origin) return;
+      bootStore();
+    });
+    return;
+  }
+  bootStore();
+}
+
+function bootStore(): void {
   const marketplace: Marketplace = detectMarketplace();
   const productPage = isProductPage(marketplace);
   const highlight = createHighlight();
@@ -153,7 +225,16 @@ function boot(): void {
     fab?.setHidden(open);
     if (open) highlight.hide();
   });
-  if (productPage) fab = createFab(() => openPanel(extractPageProduct(marketplace)));
+  // The page product: Shopify's .json wins when it answers, else the DOM.
+  let pagePromise: Promise<PageProduct> | null = null;
+  const readPage = (): Promise<PageProduct> => {
+    pagePromise ??= extractPageProductAsync(marketplace);
+    return pagePromise;
+  };
+  if (productPage) {
+    fab = createFab(() => void readPage().then(openPanel));
+    void readPage().then((p) => observeIfWatched(p, marketplace));
+  }
 
   let hovered: Element | null = null;
   let altHeld = false;
@@ -169,15 +250,19 @@ function boot(): void {
 
   // The hovered card wins; otherwise the page's own product.
   function openForHoverOrPage(): void {
-    const pageProduct = productPage ? extractPageProduct(marketplace) : null;
+    const quick = productPage ? extractPageProduct(marketplace) : null;
     const cardEl = findProductCardElement(hovered, marketplace);
     const card = cardEl ? cardToPage(productFromCard(cardEl, marketplace)) : null;
-    if (card && card.url !== pageProduct?.url) {
+    if (card && card.url !== quick?.url) {
       openPanel(card);
+      void observeIfWatched(card, marketplace);
       return;
     }
-    if (pageProduct) {
-      openPanel(pageProduct);
+    if (quick) {
+      void readPage().then((p) => {
+        openPanel(p);
+        void observeIfWatched(p, marketplace);
+      });
       return;
     }
     highlight.toast("Hover a product, then press Alt+Shift+S");

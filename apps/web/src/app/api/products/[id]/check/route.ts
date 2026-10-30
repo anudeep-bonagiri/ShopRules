@@ -1,5 +1,5 @@
 import { ApiError, currentAccount, fail, json, readJson } from "@/lib/account";
-import { getProduct } from "@/lib/db";
+import { consumeQuota, getProduct } from "@/lib/db";
 import { isCheckScope, MAX_RULES_PER_CHECK, runChecks } from "@/lib/pipeline";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +16,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     if (!product) throw new ApiError(404, "Product not found");
     const body = await readJson<{ scope?: unknown; force?: boolean; max_rules?: number; run_id?: string }>(req);
     if (body.scope !== undefined && !isCheckScope(body.scope)) throw new ApiError(400, "scope must be one of due, all, tariff, safety, tax, policy");
+    const quota = await consumeQuota(account.id, "checks");
+    if (!quota.allowed) throw new ApiError(429, quota.message ?? "Daily limit reached");
     const result = await runChecks(account, product, {
       scope: isCheckScope(body.scope) ? body.scope : "due",
       force: Boolean(body.force),

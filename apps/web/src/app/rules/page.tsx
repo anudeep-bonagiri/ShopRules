@@ -1,9 +1,10 @@
 "use client";
 
+import { Select } from "@shopify/polaris";
 import NextLink from "next/link";
 import { useMemo, useState } from "react";
-import { timeAgo, useApi } from "@/lib/client";
-import type { RuleRow } from "@/lib/db";
+import { api, timeAgo, useApi } from "@/lib/client";
+import type { AlertRow, RuleRow } from "@/lib/db";
 import { FAMILY_LABEL } from "@/lib/rules-catalog";
 import { Chip, ChipRow, EmptyCard, FAMILY_SHORT, PageError, SectionHead, Skeleton, SrButton, SrCard, StatusPill } from "@/components/stitch";
 
@@ -18,11 +19,35 @@ const FAMILY_BLURB: Record<string, string> = {
   policy: "Seller Central, Etsy Help, and Shopify Help for category policy changes.",
 };
 
+const CADENCE_OPTIONS = [
+  { label: "Daily", value: "24" },
+  { label: "Every 3 days", value: "72" },
+  { label: "Weekly", value: "168" },
+];
+
+function cadenceValue(hours: number): string {
+  if (hours <= 24) return "24";
+  if (hours <= 72) return "72";
+  return "168";
+}
+
 export default function RulesPage() {
   const list = useApi<{ rules: Rule[] }>("/api/rules");
+  const alerts = useApi<{ alerts: AlertRow[] }>("/api/alerts?status=all");
   const { data, loading } = list;
   const [family, setFamily] = useState<Family>("all");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const rules = useMemo(() => data?.rules ?? [], [data]);
+  const lastAlertByRule = useMemo(() => {
+    const m = new Map<string, AlertRow>();
+    for (const a of alerts.data?.alerts ?? []) {
+      const cur = m.get(a.rule_id);
+      if (!cur || a.created_at > cur.created_at) m.set(a.rule_id, a);
+    }
+    return m;
+  }, [alerts.data]);
   const counts: Record<Family, number> = {
     all: rules.length,
     tariff: rules.filter((r) => r.family === "tariff").length,
@@ -30,7 +55,22 @@ export default function RulesPage() {
     safety: rules.filter((r) => r.family === "safety").length,
     policy: rules.filter((r) => r.family === "policy").length,
   };
+  const paused = rules.filter((r) => r.paused).length;
   const visible = (family === "all" ? rules : rules.filter((r) => r.family === family)).slice().sort((a, b) => (b.last_run_at ?? "").localeCompare(a.last_run_at ?? ""));
+
+  async function patch(rule: Rule, body: { paused?: boolean; cadence_hours?: number }, done: string) {
+    setBusy(rule.id);
+    setError(null);
+    try {
+      const r = await api<{ rule: RuleRow }>(`/api/rules/${rule.id}`, { method: "PATCH", json: body });
+      list.setData((prev) => (prev ? { rules: prev.rules.map((x) => (x.id === rule.id ? { ...x, ...r.rule } : x)) } : prev));
+      setNotice(done);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
 
   if (list.error) return <PageError title="Watch rules" subtitle="What Shop Rules checks, where, and how often." error={list.error ?? ""} status={list.status} onRetry={list.refresh} />;
 
@@ -46,9 +86,21 @@ export default function RulesPage() {
         {data ? (
           <StatusPill tone={rules.length ? "success" : "neutral"} caps={false}>
             {rules.length} rule{rules.length === 1 ? "" : "s"}
+            {paused ? `, ${paused} paused` : ""}
           </StatusPill>
         ) : null}
       </div>
+
+      {notice ? (
+        <p className="sr-wash sr-wash--success sr-xs" role="status" aria-live="polite">
+          {notice}
+        </p>
+      ) : null}
+      {error ? (
+        <p className="sr-wash sr-wash--critical sr-xs" role="alert">
+          {error}
+        </p>
+      ) : null}
 
       <div className="sr-grid-2 sr-grid-2--tight">
         {(["tariff", "safety", "tax", "policy"] as const).map((f) => (
@@ -70,7 +122,7 @@ export default function RulesPage() {
       </ChipRow>
 
       <section className="sr-stack">
-        <SectionHead title="Rules" aside={visible.length ? "Most recently run first" : undefined} />
+        <SectionHead title="Rules" aside={visible.length ? "Most recently run first. Pause a rule to skip it; the cadence is how often it runs." : undefined} />
         {loading ? (
           <Skeleton lines={4} />
         ) : rules.length === 0 ? (
@@ -84,26 +136,48 @@ export default function RulesPage() {
         ) : (
           <SrCard flush>
             <div className="sr-rows">
-              {visible.map((r) => (
-                <div key={r.id} className="sr-stack" style={{ padding: "12px 14px", gap: 4 }}>
-                  <div className="sr-row sr-row--between" style={{ gap: 8 }}>
-                    <span className="sr-body" style={{ fontWeight: 600 }}>
-                      {r.title}
-                    </span>
-                    <div className="sr-row" style={{ gap: 6 }}>
-                      <StatusPill>{FAMILY_SHORT[r.family]}</StatusPill>
-                      {r.last_run_at ? <StatusPill tone="success">Checked</StatusPill> : <StatusPill>Queued</StatusPill>}
+              {visible.map((r) => {
+                const last = lastAlertByRule.get(r.id);
+                return (
+                  <div key={r.id} className="sr-stack" style={{ padding: "12px 14px", gap: 6, opacity: r.paused ? 0.75 : 1 }}>
+                    <div className="sr-row sr-row--between sr-row--wrap" style={{ gap: 8 }}>
+                      <span className="sr-body" style={{ fontWeight: 600 }}>
+                        {r.title}
+                      </span>
+                      <div className="sr-row sr-row--wrap" style={{ gap: 6 }}>
+                        <StatusPill>{FAMILY_SHORT[r.family]}</StatusPill>
+                        {r.paused ? <StatusPill tone="warning">Paused</StatusPill> : r.last_run_at ? <StatusPill tone="success">Checked</StatusPill> : <StatusPill>Queued</StatusPill>}
+                      </div>
+                    </div>
+                    <NextLink href={`/products/${r.product_id}`} className="sr-link" style={{ fontSize: 12, display: "block" }}>
+                      {r.product_title || "Product"}
+                    </NextLink>
+                    <p className="sr-xs sr-num">
+                      {r.include_domains.join(", ")}. Last run {timeAgo(r.last_run_at)}.
+                    </p>
+                    {r.last_headline ? (
+                      <p className="sr-xs">
+                        Last finding:{" "}
+                        {last ? (
+                          <NextLink href={`/alerts/${last.id}`} className="sr-link">
+                            {r.last_headline}
+                          </NextLink>
+                        ) : (
+                          r.last_headline
+                        )}
+                      </p>
+                    ) : null}
+                    <div className="sr-row sr-row--between sr-row--wrap" style={{ gap: 8 }}>
+                      <div style={{ minWidth: 160 }}>
+                        <Select label={`Cadence for ${r.title}`} labelHidden options={CADENCE_OPTIONS} value={cadenceValue(r.cadence_hours)} disabled={busy === r.id} onChange={(v) => void patch(r, { cadence_hours: Number(v) }, `${r.title} now runs ${CADENCE_OPTIONS.find((o) => o.value === v)?.label.toLowerCase() ?? "on the new cadence"}.`)} />
+                      </div>
+                      <SrButton variant={r.paused ? "primary" : "secondary"} loading={busy === r.id} disabled={busy != null && busy !== r.id} onClick={() => void patch(r, { paused: !r.paused }, r.paused ? `${r.title} resumed.` : `${r.title} paused. Checks and the daily schedule skip it until you resume.`)} aria-pressed={Boolean(r.paused)}>
+                        {r.paused ? "Resume" : "Pause"}
+                      </SrButton>
                     </div>
                   </div>
-                  <NextLink href={`/products/${r.product_id}`} className="sr-link" style={{ fontSize: 12, display: "block" }}>
-                    {r.product_title || "Product"}
-                  </NextLink>
-                  <p className="sr-xs sr-num">
-                    {r.include_domains.join(", ")}. Every {r.cadence_hours} h, last run {timeAgo(r.last_run_at)}.
-                  </p>
-                  {r.last_headline ? <p className="sr-xs">Last finding: {r.last_headline}</p> : null}
-                </div>
-              ))}
+                );
+              })}
             </div>
           </SrCard>
         )}

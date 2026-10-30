@@ -1,5 +1,6 @@
-import { currentAccount, fail, json } from "@/lib/account";
-import { ingestProduct, runChecks, type PageFields } from "@/lib/pipeline";
+import { ApiError, currentAccount, fail, json } from "@/lib/account";
+import { consumeQuota, findProductByUrl } from "@/lib/db";
+import { ingestProduct, normalizeListingUrl, runChecks, type PageFields } from "@/lib/pipeline";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -51,16 +52,28 @@ export async function POST() {
     const account = await currentAccount();
     const products = [];
     const errors: string[] = [];
+    // Idempotent per workspace: listings already watched are returned as they are
+    // and cost nothing; only genuinely new ones are ingested and counted.
+    let fresh = 0;
     for (const item of DEMO) {
       try {
+        const existing = await findProductByUrl(account.id, normalizeListingUrl(item.url));
+        if (existing) {
+          products.push(existing);
+          continue;
+        }
+        const quota = await consumeQuota(account.id, "ingests");
+        if (!quota.allowed) throw new ApiError(429, quota.message ?? "Daily limit reached");
         const r = await ingestProduct(account, item.url, item.page);
         products.push(r.product);
+        fresh += 1;
       } catch (err) {
+        if (err instanceof ApiError && err.status === 429) throw err;
         errors.push(err instanceof Error ? err.message : String(err));
       }
     }
     let alerts = 0;
-    if (products[0]) {
+    if (products[0] && fresh > 0) {
       try {
         const r = await runChecks(account, products[0], { maxRules: 3 });
         alerts = r.alerts.length;

@@ -1,6 +1,7 @@
 import { fail, json } from "@/lib/account";
 import { getOrCreateAccount, listAccountIds, listProducts } from "@/lib/db";
 import { runChecks } from "@/lib/pipeline";
+import { refreshPrices } from "@/lib/prices";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -11,9 +12,24 @@ async function run(req: Request) {
   const auth = req.headers.get("authorization") ?? "";
   if (!secret || auth !== `Bearer ${secret}`) return json({ error: "unauthorized" }, { status: 401 });
   const started = Date.now();
-  const summary = { accounts: 0, products: 0, checked: 0, alerts: 0, errors: 0 };
+  const summary = { accounts: 0, products: 0, checked: 0, alerts: 0, errors: 0, prices: { fetched: 0, recorded: 0, alerts: 0, errors: 0 } };
   try {
-    for (const id of await listAccountIds()) {
+    const ids = await listAccountIds();
+    // Price refresh first: no model calls, so it always fits the budget.
+    for (const id of ids) {
+      if (Date.now() - started > 90_000) break;
+      try {
+        const r = await refreshPrices(await getOrCreateAccount(id), { budgetMs: 90_000, started });
+        summary.prices.fetched += r.fetched;
+        summary.prices.recorded += r.recorded;
+        summary.prices.alerts += r.alerts;
+        summary.prices.errors += r.errors;
+      } catch (err) {
+        summary.prices.errors += 1;
+        console.error("[shop-rules] cron price refresh failed", id, err);
+      }
+    }
+    for (const id of ids) {
       summary.accounts += 1;
       const account = await getOrCreateAccount(id);
       for (const product of await listProducts(account.id)) {

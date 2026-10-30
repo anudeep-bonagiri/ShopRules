@@ -1,6 +1,7 @@
 import { ApiError, currentAccount, fail, json, readJson } from "@/lib/account";
 import { deleteProduct, getProduct, listAlerts, listPrices, listRules, listSkills, updateProductOverrides } from "@/lib/db";
 import { sanitizeOverrides } from "@/lib/product";
+import { reseedProductRules } from "@/lib/pipeline";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,14 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     if (errors.length) throw new ApiError(400, errors.join("; "));
     if (Object.keys(patch).length === 0) throw new ApiError(400, "Nothing to update");
     const updated = await updateProductOverrides(account.id, product.id, patch);
-    return json({ product: updated });
+    // Origin, heading, materials, and the for-children flag decide which rules apply.
+    const reseedKeys = ["origin_country", "hts_heading", "for_children", "materials"];
+    let reseed: { added: number; removed: number; kept: number } | null = null;
+    if (Object.keys(patch).some((k) => reseedKeys.includes(k))) {
+      const r = await reseedProductRules(account, updated);
+      reseed = { added: r.added, removed: r.removed, kept: r.kept };
+    }
+    return json({ product: updated, reseed });
   } catch (err) {
     return fail(err);
   }

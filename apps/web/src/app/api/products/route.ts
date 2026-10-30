@@ -1,6 +1,6 @@
 import { ApiError, currentAccount, fail, json, readJson } from "@/lib/account";
-import { listProducts } from "@/lib/db";
-import { ingestProduct, type PageFields } from "@/lib/pipeline";
+import { consumeQuota, findProductByUrl, listProducts } from "@/lib/db";
+import { ingestProduct, normalizeListingUrl, type PageFields } from "@/lib/pipeline";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -22,6 +22,17 @@ export async function POST(req: Request) {
     const products = await listProducts(account.id);
     if (products.length >= 25) throw new ApiError(429, "This workspace watches 25 products already. Remove one first.");
     const page = body.page && typeof body.page === "object" ? sanitizePage(body.page) : undefined;
+    // Re-adding a watched listing is free; a new one counts against the daily ingest cap.
+    let known = false;
+    try {
+      known = Boolean(await findProductByUrl(account.id, normalizeListingUrl(body.url)));
+    } catch {
+      known = false;
+    }
+    if (!known) {
+      const quota = await consumeQuota(account.id, "ingests");
+      if (!quota.allowed) throw new ApiError(429, quota.message ?? "Daily limit reached");
+    }
     const result = await ingestProduct(account, body.url, page, { runId: typeof body.run_id === "string" ? body.run_id : undefined });
     return json({ product: result.product, rules: result.rules, meter: result.meter, existing: result.existing }, { status: result.existing ? 200 : 201 });
   } catch (err) {

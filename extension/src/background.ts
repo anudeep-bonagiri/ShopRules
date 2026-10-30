@@ -1,21 +1,15 @@
 // Service worker: owns the token, calls the Shop Rules API, polls for new
-// alerts, keeps the badge in sync, and relays the keyboard command to tabs.
-import type {
-  Alert,
-  AlertsResponse,
-  ApiErrorCode,
-  ApiFailure,
-  BgRequest,
-  BgResult,
-  Settings,
-  TabMessage,
-} from "./types";
+// alerts (by id, one notification each), keeps the badge in sync, relays the
+// keyboard command to tabs, and accepts the connect handshake from the web app.
+import type { Alert, AlertsResponse, ApiErrorCode, ApiFailure, BgRequest, BgResult, Settings, TabMessage } from "./types";
 
 const DEFAULT_BASE_URL = "https://shop-rules.vercel.app";
 const POLL_ALARM = "shop-rules-poll-alerts";
 const POLL_MINUTES = 15;
 const BADGE_COLOR = "#008060";
 const NOTIFICATION_PREFIX = "shop-rules-alert-";
+const SEEN_KEY = "seenAlertIds";
+const MAX_SEEN = 500;
 
 interface ApiError {
   error: string;
@@ -63,7 +57,7 @@ function readErrorMessage(body: unknown, res: Response): string {
 async function api<T>(path: string, init: RequestInit = {}, requireToken = true): Promise<T> {
   const { baseUrl, token } = await getSettings();
   if (requireToken && !token) {
-    throw apiError("Paste your account token in the Shop Rules popup to connect.", "unconfigured");
+    throw apiError("Connect the extension from the Shop Rules Settings page, or paste your account token in the popup.", "unconfigured");
   }
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
@@ -92,20 +86,22 @@ async function api<T>(path: string, init: RequestInit = {}, requireToken = true)
   return body as T;
 }
 
-function post(body: unknown): RequestInit {
-  return { method: "POST", body: JSON.stringify(body) };
+function post(body: unknown, method = "POST"): RequestInit {
+  return { method, body: JSON.stringify(body) };
 }
 
 // Message routing
 
-async function handle(message: BgRequest): Promise<unknown> {
+async function handle(message: BgRequest, sender: chrome.runtime.MessageSender): Promise<unknown> {
   switch (message.type) {
     case "lookup":
       return api(`/api/lookup?url=${encodeURIComponent(message.url)}`);
     case "watch":
-      return api("/api/products", post({ url: message.url, page: message.page }));
+      return api("/api/products", post({ url: message.url, page: message.page, ...(message.page && "run_id" in message.page ? {} : {}) }));
     case "product":
       return api(`/api/products/${encodeURIComponent(message.id)}`);
+    case "products":
+      return api("/api/products");
     case "compare":
       return api("/api/compare", post(message.body));
     case "alerts":
@@ -114,17 +110,25 @@ async function handle(message: BgRequest): Promise<unknown> {
       return api("/api/health", {}, false);
     case "check":
       return api(`/api/products/${encodeURIComponent(message.id)}/check`, post({ scope: message.scope ?? "due", force: message.force ?? false, ...(message.run_id ? { run_id: message.run_id } : {}) }));
+    case "run":
+      return api(`/api/runs/${encodeURIComponent(message.id)}`);
+    case "observe":
+      return api(`/api/products/${encodeURIComponent(message.id)}/prices`, post({ price: message.price, currency: message.currency, source: "extension", observed_at: new Date().toISOString(), ...(message.confidence !== undefined ? { confidence: message.confidence } : {}) }));
+    case "patchProduct":
+      return api(`/api/products/${encodeURIComponent(message.id)}`, post(message.patch, "PATCH"));
     case "account":
       return api("/api/account");
     case "alertStatus":
-      return api(`/api/alerts/${encodeURIComponent(message.id)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ status: message.status, ...(message.reason ? { reason: message.reason } : {}) }),
-      });
+      return api(`/api/alerts/${encodeURIComponent(message.id)}`, post({ status: message.status, ...(message.reason ? { reason: message.reason } : {}) }, "PATCH"));
     case "settings":
       return getSettings();
+    case "connect":
+      return connect(message.token, message.baseUrl, sender);
     case "open-popup":
       return openPopup();
+    case "open-url":
+      await chrome.tabs.create({ url: message.url });
+      return { opened: true };
     case "poll":
       return pollAlerts();
     default: {
@@ -134,13 +138,27 @@ async function handle(message: BgRequest): Promise<unknown> {
   }
 }
 
-chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse: (r: BgResult<unknown>) => void) => {
+chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse: (r: BgResult<unknown>) => void) => {
   if (typeof message !== "object" || message === null || !("type" in message)) return false;
-  handle(message as BgRequest)
+  handle(message as BgRequest, sender)
     .then((data) => sendResponse({ ok: true, data }))
     .catch((err: unknown) => sendResponse(toFailure(err)));
   return true;
 });
+
+// The web app's Settings page posts its token through the content script on
+// its own origin. Only accept it from a tab whose origin matches the baseUrl.
+async function connect(token: string, baseUrl: string, sender: chrome.runtime.MessageSender): Promise<{ connected: boolean; baseUrl: string }> {
+  const normalized = normalizeBaseUrl(baseUrl);
+  const senderOrigin = sender.url ? new URL(sender.url).origin : null;
+  if (!senderOrigin || senderOrigin !== new URL(normalized).origin) throw apiError("Connect request came from a different origin than the app URL.", "internal");
+  if (!/^sr_live_[a-f0-9]{36}$/.test(token)) throw apiError("That does not look like a Shop Rules token.", "internal");
+  await chrome.storage.sync.set({ baseUrl: normalized, token });
+  // Verify before claiming success so a stale token is caught here, not later.
+  await api("/api/account");
+  void pollAlerts();
+  return { connected: true, baseUrl: normalized };
+}
 
 async function openPopup(): Promise<{ opened: boolean }> {
   try {
@@ -151,7 +169,7 @@ async function openPopup(): Promise<{ opened: boolean }> {
   }
 }
 
-// Alert polling and badge
+// Alert polling, notifications by id, badge
 
 async function setBadge(count: number): Promise<void> {
   await chrome.action.setBadgeBackgroundColor({ color: BADGE_COLOR });
@@ -159,38 +177,41 @@ async function setBadge(count: number): Promise<void> {
   await chrome.action.setBadgeText({ text: count > 0 ? String(count) : "" });
 }
 
-function notify(alert: Alert, added: number): void {
-  const detail = [alert.product_title, alert.action?.title].filter(Boolean).join(": ");
+function notify(alert: Alert): void {
+  const title = alert.product_title ? alert.product_title.slice(0, 60) : "Shop Rules";
   chrome.notifications.create(`${NOTIFICATION_PREFIX}${alert.id}`, {
     type: "basic",
     iconUrl: chrome.runtime.getURL("icons/icon128.png"),
-    title: alert.headline,
-    message: detail || "Open Shop Rules to review the alert.",
-    contextMessage: added === 1 ? "1 new alert" : `${added} new alerts`,
+    title,
+    message: alert.headline,
+    contextMessage: alert.kind === "price" ? "Price change" : alert.action?.title || "Open Shop Rules to review the alert.",
+    priority: alert.severity === "high" ? 2 : 1,
   });
 }
 
-async function pollAlerts(): Promise<{ count: number }> {
+async function pollAlerts(): Promise<{ count: number; new_ids: string[] }> {
   const { token } = await getSettings();
   if (!token) {
     await setBadge(0);
-    return { count: 0 };
+    return { count: 0, new_ids: [] };
   }
   let alerts: Alert[];
   try {
     ({ alerts } = await api<AlertsResponse>("/api/alerts?status=new"));
   } catch (err) {
     console.error("Shop Rules: alert poll failed", err);
-    return { count: -1 };
+    return { count: -1, new_ids: [] };
   }
-  const count = alerts.length;
-  await setBadge(count);
-  const stored = await chrome.storage.local.get({ lastAlertCount: 0 });
-  const previous = Number(stored.lastAlertCount ?? 0);
-  const newest = alerts[0];
-  if (count > previous && newest) notify(newest, count - previous);
-  await chrome.storage.local.set({ lastAlertCount: count, lastPolledAt: Date.now() });
-  return { count };
+  await setBadge(alerts.length);
+  const stored = await chrome.storage.local.get({ [SEEN_KEY]: [] as string[], firstPollDone: false });
+  const seen = new Set<string>(Array.isArray(stored[SEEN_KEY]) ? (stored[SEEN_KEY] as string[]) : []);
+  const fresh = alerts.filter((a) => !seen.has(a.id));
+  // The very first poll after connecting seeds the seen set silently; a seller
+  // with 12 existing alerts should not get 12 notifications at once.
+  if (stored.firstPollDone) for (const a of fresh.slice(0, 5)) notify(a);
+  const nextSeen = [...alerts.map((a) => a.id), ...Array.from(seen)].slice(0, MAX_SEEN);
+  await chrome.storage.local.set({ [SEEN_KEY]: nextSeen, firstPollDone: true, lastPolledAt: Date.now(), lastAlertCount: alerts.length });
+  return { count: alerts.length, new_ids: fresh.map((a) => a.id) };
 }
 
 async function ensureAlarm(): Promise<void> {
@@ -213,13 +234,16 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "sync" && (changes.token || changes.baseUrl)) void pollAlerts();
+  if (area === "sync" && (changes.token || changes.baseUrl)) {
+    void chrome.storage.local.set({ firstPollDone: false, [SEEN_KEY]: [] }).then(() => pollAlerts());
+  }
 });
 
 chrome.notifications.onClicked.addListener((id) => {
   if (!id.startsWith(NOTIFICATION_PREFIX)) return;
   chrome.notifications.clear(id);
-  void getSettings().then(({ baseUrl }) => chrome.tabs.create({ url: `${baseUrl}/alerts` }));
+  const alertId = id.slice(NOTIFICATION_PREFIX.length);
+  void getSettings().then(({ baseUrl }) => chrome.tabs.create({ url: `${baseUrl}/alerts/${encodeURIComponent(alertId)}` }));
 });
 
 // Keyboard command

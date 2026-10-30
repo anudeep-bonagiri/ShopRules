@@ -1,4 +1,5 @@
 import type { Marketplace, ProductProfile, RuleFamily } from "./schemas";
+import { NEXUS_SEEDS, describeThreshold } from "./nexus";
 
 // The catalog seeds watch rules for a product. Every threshold and source here
 // is a starting point that the watch loop verifies against the live official
@@ -26,32 +27,17 @@ export interface StateTaxSeed {
 // Economic nexus seeds for remote sellers. Marketplace facilitator laws mean
 // Amazon and Etsy collect for you in every one of these states; Shopify sellers
 // register themselves once they cross the threshold.
-export const STATES: StateTaxSeed[] = [
-  { code: "TX", name: "Texas", dor_domain: "comptroller.texas.gov", threshold_note: "$500,000 in Texas revenue over the prior 12 months" },
-  { code: "CA", name: "California", dor_domain: "cdtfa.ca.gov", threshold_note: "$500,000 in sales into California in the current or prior calendar year" },
-  { code: "NY", name: "New York", dor_domain: "tax.ny.gov", threshold_note: "$500,000 in sales and 100 or more transactions in the prior four quarters" },
-  { code: "FL", name: "Florida", dor_domain: "floridarevenue.com", threshold_note: "$100,000 in taxable remote sales in the prior calendar year" },
-  { code: "IL", name: "Illinois", dor_domain: "tax.illinois.gov", threshold_note: "$100,000 in sales or 200 transactions over the prior 12 months" },
-  { code: "PA", name: "Pennsylvania", dor_domain: "revenue.pa.gov", threshold_note: "$100,000 in gross sales in the prior 12 months" },
-  { code: "OH", name: "Ohio", dor_domain: "tax.ohio.gov", threshold_note: "$100,000 in sales or 200 transactions in the current or prior year" },
-  { code: "GA", name: "Georgia", dor_domain: "dor.georgia.gov", threshold_note: "$100,000 in sales or 200 transactions in the current or prior year" },
-  { code: "NC", name: "North Carolina", dor_domain: "ncdor.gov", threshold_note: "$100,000 in gross sales in the current or prior year" },
-  { code: "MI", name: "Michigan", dor_domain: "michigan.gov", threshold_note: "$100,000 in sales or 200 transactions in the prior calendar year" },
-  { code: "NJ", name: "New Jersey", dor_domain: "nj.gov", threshold_note: "$100,000 in sales or 200 transactions in the current or prior year" },
-  { code: "VA", name: "Virginia", dor_domain: "tax.virginia.gov", threshold_note: "$100,000 in sales or 200 transactions in the current or prior year" },
-  { code: "WA", name: "Washington", dor_domain: "dor.wa.gov", threshold_note: "$100,000 in gross receipts in the current or prior year" },
-  { code: "AZ", name: "Arizona", dor_domain: "azdor.gov", threshold_note: "$100,000 in sales in the current or prior year" },
-  { code: "MA", name: "Massachusetts", dor_domain: "mass.gov", threshold_note: "$100,000 in sales in the prior or current calendar year" },
-  { code: "CO", name: "Colorado", dor_domain: "tax.colorado.gov", threshold_note: "$100,000 in retail sales in the current or prior year" },
-  { code: "TN", name: "Tennessee", dor_domain: "tn.gov", threshold_note: "$100,000 in sales in the prior 12 months" },
-  { code: "IN", name: "Indiana", dor_domain: "in.gov", threshold_note: "$100,000 in gross revenue in the current or prior year" },
-  { code: "MN", name: "Minnesota", dor_domain: "revenue.state.mn.us", threshold_note: "$100,000 in sales or 200 transactions over the prior 12 months" },
-  { code: "WI", name: "Wisconsin", dor_domain: "revenue.wi.gov", threshold_note: "$100,000 in sales in the current or prior year" },
-];
+// Derived from nexus-thresholds.json (seed values; the live check verifies them).
+export const STATES: StateTaxSeed[] = NEXUS_SEEDS.map((n) => ({
+  code: n.state,
+  name: n.name,
+  dor_domain: n.dor_domain,
+  threshold_note: `${describeThreshold(n)} ${n.period === "12_months" ? "over the preceding 12 months" : "in the previous or current calendar year"}`,
+}));
 
 export const TARIFF_DOMAINS = ["cbp.gov", "ustr.gov", "federalregister.gov", "trade.gov", "hts.usitc.gov", "whitehouse.gov"];
 
-const COUNTRY_NAMES: Record<string, string> = {
+export const COUNTRY_NAMES: Record<string, string> = {
   CN: "China",
   VN: "Vietnam",
   IN: "India",
@@ -111,8 +97,8 @@ export function buildRules(profile: ProductProfile, marketplace: Marketplace, sh
   rules.push({
     family: "tariff",
     key: "tariff-origin",
-    title: `Tariffs on ${type} from ${origin}`,
-    query: `${origin} ${type} tariff duty rate change ${year}`,
+    title: profile.origin_country ? `Tariffs on ${type} from ${origin}` : `Tariffs on ${type} from unknown origin, set it to sharpen tariff checks`,
+    query: profile.origin_country ? `${origin} ${type} tariff duty rate change ${year}` : `${type} import tariff duty rate change ${year}`,
     include_domains: TARIFF_DOMAINS,
     include_domains_mode: "strict",
     cadence_hours: 12,
@@ -263,8 +249,8 @@ export function buildRules(profile: ProductProfile, marketplace: Marketplace, sh
       cadence_hours: 72,
       state: st.code,
       seed_note: facilitatorCovered
-        ? `${marketplace === "amazon" ? "Amazon" : "Etsy"} collects as a marketplace facilitator here. Seed threshold: ${st.threshold_note}.`
-        : `You register and collect once you cross the threshold. Seed threshold: ${st.threshold_note}.`,
+        ? `${marketplace === "amazon" ? "Amazon" : "Etsy"} collects as a marketplace facilitator here. Seed threshold: ${st.threshold_note}. Seed value until a check quotes the revenue site.`
+        : `You register and collect once you cross the threshold. Seed threshold: ${st.threshold_note}. Seed value until a check quotes the revenue site.`,
     });
   }
 

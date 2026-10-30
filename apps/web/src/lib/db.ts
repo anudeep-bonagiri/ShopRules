@@ -1,9 +1,10 @@
 import { del, get, list, put } from "@vercel/blob";
-import type { Marketplace, ProductProfile, RuleFamily, VerifiedClaim } from "./schemas";
+import type { CompetitorListings, Marketplace, ProductProfile, RuleFamily, VerifiedClaim } from "./schemas";
 import type { RuleSpec } from "./rules-catalog";
 import type { PricingResult } from "./pricing";
 import type { GuardrailIssue } from "./sanity";
 import type { ProductOverrides } from "./product";
+import { decideQuota, limitFor, pruneUsage, usageKey, type LimitKind, type QuotaDecision } from "./limits";
 
 // Server-only data layer. Each workspace (account) is one private JSON document
 // in Vercel Blob. Every write creates a new immutable version file under
@@ -17,7 +18,25 @@ export interface AccountRow {
   id: string;
   token: string;
   telegram_chat_id: string | null;
-  settings: { ship_to_states?: string[]; target_margin_pct?: number; currency?: string; unit_cost_pct?: number; units_per_week?: number; state_sales?: Record<string, number> };
+  settings: {
+    ship_to_states?: string[];
+    target_margin_pct?: number;
+    currency?: string;
+    unit_cost_pct?: number;
+    units_per_week?: number;
+    /** 0..1 share of landed cost that is customs value. */
+    dutiable_share?: number;
+    rounding?: 0.5 | 0.99 | 0.01;
+    /** Price move (percent) that raises a price_change alert. */
+    price_change_pct?: number;
+    /** Current-year dollars per state, typed by hand or set from the import. */
+    state_sales?: Record<string, number>;
+    /** From the orders CSV import: year -> state -> dollars and order count. Aggregates only. */
+    state_sales_by_year?: Record<string, Record<string, { dollars: number; orders: number }>>;
+    sales_import?: { source: "shopify" | "etsy"; imported_at: string; orders_seen: number; years: number[] } | null;
+  };
+  /** Daily counters for the paid endpoints, keyed YYYY-MM-DD:kind. See limits.ts. */
+  usage?: Record<string, number>;
   created_at: string;
 }
 
@@ -33,6 +52,8 @@ export interface ProductRow {
   profile: ProductProfile;
   /** Seller-set fields; see product.ts. The classifier never writes here. */
   overrides?: ProductOverrides | null;
+  /** Last competitor search, kept 24 h because it is a paid call. */
+  compare_cache?: { at: string; result: CompetitorListings & { price_position: string } } | null;
   extracted_text: string | null;
   created_at: string;
   last_checked_at: string | null;
@@ -46,6 +67,8 @@ export interface RuleRow extends RuleSpec {
   last_run_at: string | null;
   last_hash: string | null;
   last_headline: string | null;
+  /** Paused rules are skipped by checks and cron until resumed. */
+  paused?: boolean;
   created_at: string;
 }
 
@@ -56,6 +79,10 @@ export interface AlertRow {
   rule_id: string;
   status: "new" | "dismissed" | "actioned";
   family: RuleFamily;
+  /** rule (default): raised by a rule check. price: raised by price tracking (prices.ts). */
+  kind?: "rule" | "price";
+  /** Set on kind "price". */
+  price_change?: { old_price: number; new_price: number; delta: number; pct: number } | null;
   severity: "high" | "medium" | "low";
   relevance: "affects" | "might_affect";
   headline: string;
@@ -63,7 +90,16 @@ export interface AlertRow {
   proposed: number;
   backed: number;
   rejected: number;
-  impact: { severity: string; effective_date: string | null; tariff_rate_change_pct: number | null; estimated_cost_change_pct: number | null; hash?: string };
+  impact: {
+    severity: string;
+    effective_date: string | null;
+    tariff_rate_change_pct: number | null;
+    estimated_cost_change_pct: number | null;
+    hash?: string;
+    /** Sales-tax rules: the threshold the quote states, kept only when the guard found the numbers in a backed quote. */
+    nexus?: { dollars: number | null; transactions: number | null; operator: "or" | "and" | null } | null;
+    nexus_verified?: boolean;
+  };
   action: { type: string; title: string; steps: string[]; suggested_price: number | null; rationale: string };
   /** Deterministic reprice math computed server-side from the alert facts (pricing.ts). Absent on alerts older than this field. */
   pricing?: PricingResult | null;
@@ -439,6 +475,13 @@ export async function updateProductOverrides(accountId: string, id: string, patc
   });
 }
 
+export async function setCompareCache(accountId: string, id: string, result: CompetitorListings): Promise<void> {
+  await mutate(accountId, (ws) => {
+    const p = ws.products.find((x) => x.id === id);
+    if (p) p.compare_cache = { at: now(), result };
+  });
+}
+
 export async function deleteProduct(accountId: string, id: string): Promise<void> {
   await mutate(accountId, (ws) => {
     ws.products = ws.products.filter((p) => p.id !== id);
@@ -480,12 +523,42 @@ export async function listRulesForAccount(accountId: string): Promise<RuleRow[]>
   return [...ws.rules];
 }
 
-export async function updateRule(id: string, patch: Partial<Pick<RuleRow, "last_run_at" | "last_hash" | "last_headline" | "cadence_hours">>, accountId?: string): Promise<void> {
+export async function updateRule(id: string, patch: Partial<Pick<RuleRow, "last_run_at" | "last_hash" | "last_headline" | "cadence_hours" | "paused">>, accountId?: string): Promise<RuleRow | null> {
   const owner = accountId ?? (await findOwnerByRule(id));
-  if (!owner) return;
-  await mutate(owner, (ws) => {
+  if (!owner) return null;
+  return mutate(owner, (ws) => {
     const r = ws.rules.find((x) => x.id === id);
     if (r) Object.assign(r, patch);
+    return r ?? null;
+  });
+}
+
+// Reseeds a product's rules from fresh specs, keyed by rule.key: rules whose key
+// still exists keep their id, schedule, hash, and last finding (only the spec
+// fields are refreshed), new keys are added, missing keys are removed along
+// with nothing else (alerts keep pointing at their rule id even if it is gone).
+export async function reseedRules(accountId: string, productId: string, specs: RuleSpec[]): Promise<{ rules: RuleRow[]; added: number; removed: number; kept: number }> {
+  return mutate(accountId, (ws) => {
+    const mine = ws.rules.filter((r) => r.product_id === productId);
+    const byKey = new Map(mine.map((r) => [r.key, r]));
+    const wanted = new Set(specs.map((s) => s.key));
+    let added = 0;
+    let kept = 0;
+    const next: RuleRow[] = [];
+    for (const s of specs) {
+      const existing = byKey.get(s.key);
+      if (existing) {
+        Object.assign(existing, { title: s.title, query: s.query, include_domains: s.include_domains, include_domains_mode: s.include_domains_mode, state: s.state, seed_note: s.seed_note, family: s.family });
+        next.push(existing);
+        kept += 1;
+      } else {
+        next.push({ ...s, id: uid(), account_id: accountId, product_id: productId, last_run_at: null, last_hash: null, last_headline: null, created_at: now() });
+        added += 1;
+      }
+    }
+    const removed = mine.filter((r) => !wanted.has(r.key)).length;
+    ws.rules = [...ws.rules.filter((r) => r.product_id !== productId), ...next];
+    return { rules: next, added, removed, kept };
   });
 }
 
@@ -640,6 +713,44 @@ export async function listSkills(accountId: string, productId?: string): Promise
 export async function deleteSkill(accountId: string, id: string): Promise<void> {
   await mutate(accountId, (ws) => {
     ws.skills = ws.skills.filter((s) => s.id !== id);
+  });
+}
+
+export async function updateSkill(accountId: string, id: string, patch: Partial<Pick<SkillRow, "text" | "scope">>): Promise<SkillRow | null> {
+  return mutate(accountId, (ws) => {
+    const s = ws.skills.find((x) => x.id === id);
+    if (s) Object.assign(s, patch);
+    return s ?? null;
+  });
+}
+
+// Token rotation: a new token file is written first, the account switches to
+// it, then the old file is removed so the old token stops working.
+export async function rotateToken(accountId: string): Promise<AccountRow> {
+  requireDb();
+  const fresh = newToken();
+  await put(tokenPath(fresh), JSON.stringify({ account_id: accountId }), { ...ACCESS, addRandomSuffix: false, contentType: "application/json", cacheControlMaxAge: 0 });
+  let old: string | null = null;
+  const account = await mutate(accountId, (ws) => {
+    old = ws.account.token;
+    ws.account.token = fresh;
+    return ws.account;
+  });
+  if (old && old !== fresh) await del(tokenPath(old)).catch(() => undefined);
+  return account;
+}
+
+// Daily quota on paid endpoints (limits.ts). Returns the decision; when allowed
+// the counter is already incremented.
+export async function consumeQuota(accountId: string, kind: LimitKind, cost = 1): Promise<QuotaDecision> {
+  const limit = limitFor(kind);
+  const key = usageKey(kind);
+  return mutate(accountId, (ws) => {
+    ws.account.usage = pruneUsage(ws.account.usage ?? {});
+    const used = ws.account.usage[key] ?? 0;
+    const decision = decideQuota(kind, used, limit, cost);
+    if (decision.allowed) ws.account.usage[key] = used + cost;
+    return decision;
   });
 }
 
