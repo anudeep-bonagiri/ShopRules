@@ -271,6 +271,8 @@ export default function ProductInspectorPage() {
                 {hts?.code ? (
                   <p className="sr-xs sr-num">
                     HS {hts.code}, {hts.description} ({Math.round(hts.confidence * 100)}% confidence)
+                    {profile?.hts_detail ? `, suggested ${profile.hts_detail}, verify with a broker` : ""}
+                    {profile?.hts_guarded ? ". Heading set from the catalog, the classifier disagreed" : ""}
                   </p>
                 ) : null}
               </div>

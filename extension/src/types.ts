@@ -27,6 +27,8 @@ export interface ProductProfile {
   is_food_contact: boolean;
   is_supplement_or_food: boolean;
   hts_candidates: Array<{ code: string; description: string; confidence: number }>;
+  hts_detail?: string | null;
+  hts_guarded?: boolean;
   keywords: string[];
   summary: string;
 }

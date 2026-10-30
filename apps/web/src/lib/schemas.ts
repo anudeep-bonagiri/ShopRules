@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { HTS_HEADING_CODES } from "./hts-catalog";
 
 // Structured output the product classifier (Nemotron Nano) must return.
 export const ProductProfileSchema = z.object({
@@ -28,8 +29,22 @@ export const ProductProfileSchema = z.object({
     .max(3),
   keywords: z.array(z.string()).max(8),
   summary: z.string(),
+  /** Free-text 6 or 8 digit refinement from the model. Suggested only; verify with a broker. */
+  hts_detail: z.string().nullable().optional(),
+  /** True when the catalog guardrail overrode or capped the model's heading. */
+  hts_guarded: z.boolean().optional(),
 });
 export type ProductProfile = z.infer<typeof ProductProfileSchema>;
+
+// What the classifier is asked to return: the same facts, but the tariff heading
+// is an enum over the curated catalog so the model cannot invent a heading.
+export const ClassifierOutputSchema = ProductProfileSchema.omit({ hts_candidates: true, hts_detail: true, hts_guarded: true }).extend({
+  hts_heading: z.enum(HTS_HEADING_CODES),
+  hts_alternatives: z.array(z.enum(HTS_HEADING_CODES)).max(2),
+  hts_confidence: z.number().min(0).max(1),
+  hts_detail: z.string().nullable(),
+});
+export type ClassifierOutput = z.infer<typeof ClassifierOutputSchema>;
 
 // Structured output the rule checker (Nemotron Ultra) must return for one watch rule.
 export const RuleCheckSchema = z.object({

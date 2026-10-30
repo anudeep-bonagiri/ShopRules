@@ -19,9 +19,10 @@ import {
 import { chatJSON, costUsd, PRICES_PER_M } from "./nemotron";
 import { buildRules, countryName, marketplaceFromUrl, type RuleSpec } from "./rules-catalog";
 import { pricingInputs, reprice } from "./pricing";
+import { catalogMenu, finalizeHts } from "./hts-catalog";
 import {
+  ClassifierOutputSchema,
   CompetitorListingsSchema,
-  ProductProfileSchema,
   RuleCheckSchema,
   SkillSchema,
   newMeter,
@@ -145,27 +146,33 @@ export async function ingestProduct(account: AccountRow, rawUrl: string, page?: 
     throw new ApiError(422, `Could not read that listing${extractError ? ` (${extractError})` : ""}. Add it from the extension, which sends the page fields along.`);
   }
 
-  const profile = await chatJSON(
+  const classified = await chatJSON(
     "nano",
     {
       name: "product_profile",
       purpose: "classify listing",
-      schema: ProductProfileSchema,
+      schema: ClassifierOutputSchema,
       system: [
         "You classify an e-commerce listing for a compliance and pricing watch service.",
         "Read the listing text and fill every field. Use null when the listing does not say.",
         "origin_country is the ISO 3166-1 alpha-2 code of where the product is made or ships from ONLY if the listing states it; otherwise null.",
-        "hts_candidates: up to three plausible US Harmonized Tariff Schedule headings (4 to 6 digits, like 9503.00) with a confidence between 0 and 1.",
+        "hts_heading: the four-digit US Harmonized Tariff Schedule heading for this product, chosen ONLY from the HEADINGS menu below (answer with the four digits exactly as listed). hts_alternatives: up to two other menu headings that could apply. hts_confidence: 0 to 1.",
+        "hts_detail: your best 6 or 8 digit refinement under that heading (like 9405.20.60), or null. It is a suggestion the seller verifies with a broker.",
         "intended_for_children is true for toys, kids' clothing, nursery items, or anything marketed to under-12s.",
         "keywords: up to 8 short search terms a customs broker or safety regulator would use for this product type.",
         "summary: two plain sentences describing the product for a regulator.",
         "Return JSON only.",
+        "HEADINGS\n" + catalogMenu(),
       ].join(" "),
       user: `Marketplace: ${marketplace}\nURL: ${url}\n\nListing text:\n${combined.slice(0, 12000)}`,
       maxTokens: 1200,
     },
     meter,
   );
+  const { hts_heading, hts_alternatives, hts_confidence, hts_detail, ...facts } = classified;
+  // The catalog is the guardrail: off-list or unsupported headings fall back to keyword evidence.
+  const hts = finalizeHts({ heading: hts_heading, alternatives: hts_alternatives, confidence: hts_confidence }, page?.title ?? facts.title, combined);
+  const profile: ProductProfile = { ...facts, hts_candidates: hts.candidates, hts_detail: hts_detail ? plain(hts_detail).slice(0, 40) : null, hts_guarded: hts.guarded };
 
   const price = profile.price ?? page?.price ?? null;
   const currency = profile.currency ?? page?.currency ?? (price != null ? "USD" : null);
