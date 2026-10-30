@@ -257,7 +257,7 @@ export type BgRequest =
   | { type: "compare"; body: CompareRequest }
   | { type: "alerts" }
   | { type: "health" }
-  | { type: "check"; id: string; force?: boolean }
+  | { type: "check"; id: string; scope?: "due" | "all" | "tariff" | "safety" | "tax" | "policy"; force?: boolean; run_id?: string }
   | { type: "account" }
   | { type: "alertStatus"; id: string; status: AlertStatus; reason?: string }
   | { type: "settings" }

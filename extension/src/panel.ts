@@ -1107,7 +1107,7 @@ export class Panel {
     if (!s || !id || s.busy) return;
     const seq = this.seq;
     this.update({ busy: "check", actionError: null, notice: null });
-    const result = await this.send<CheckResponse>({ type: "check", id });
+    const result = await this.send<CheckResponse>({ type: "check", id, scope: "due" });
     if (!this.current(seq)) return;
     if (!result.ok) {
       this.update({ busy: null, actionError: result.error });

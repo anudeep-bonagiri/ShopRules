@@ -113,7 +113,7 @@ async function handle(message: BgRequest): Promise<unknown> {
     case "health":
       return api("/api/health", {}, false);
     case "check":
-      return api(`/api/products/${encodeURIComponent(message.id)}/check`, post({ force: message.force ?? false }));
+      return api(`/api/products/${encodeURIComponent(message.id)}/check`, post({ scope: message.scope ?? "due", force: message.force ?? false, ...(message.run_id ? { run_id: message.run_id } : {}) }));
     case "account":
       return api("/api/account");
     case "alertStatus":

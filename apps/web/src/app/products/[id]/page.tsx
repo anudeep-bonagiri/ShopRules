@@ -1,11 +1,11 @@
 "use client";
 
-import { Banner } from "@shopify/polaris";
+import { Banner, Select } from "@shopify/polaris";
 import NextLink from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { api, timeAgo, useApi } from "@/lib/client";
-import type { AccountRow, AlertRow, ForgeRow, PriceRow, ProductRow, RuleRow, SkillRow } from "@/lib/db";
+import type { AccountRow, AlertRow, CheckRunRecord, CheckScope, ForgeRow, PriceRow, ProductRow, RuleRow, SkillRow } from "@/lib/db";
 import { computeEconomics, fmtMoney, fmtPct } from "@/lib/economics";
 import { countryName, FAMILY_LABEL } from "@/lib/rules-catalog";
 import { Sparkline } from "@/components/ui";
@@ -34,7 +34,24 @@ import {
 } from "@/components/stitch";
 
 type Detail = { product: ProductRow; rules: RuleRow[]; alerts: AlertRow[]; price_history: PriceRow[]; skills: SkillRow[] };
-type CheckResult = { alerts: AlertRow[]; checked: number; skipped_unchanged: number; errors: string[]; meter: { tavily_calls: number; llm: Array<{ tier: string; cost_usd: number }> } };
+type CheckResult = { alerts: AlertRow[]; checked: number; skipped_unchanged: number; errors: string[]; run_id: string; meter: { tavily_calls: number; llm: Array<{ tier: string; cost_usd: number }> } };
+
+const SCOPE_OPTIONS: Array<{ label: string; value: CheckScope }> = [
+  { label: "Due rules", value: "due" },
+  { label: "Every rule", value: "all" },
+  { label: "Tariffs only", value: "tariff" },
+  { label: "Product safety only", value: "safety" },
+  { label: "Sales tax only", value: "tax" },
+  { label: "Marketplace policy only", value: "policy" },
+];
+
+function newRunId(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+}
 
 export default function ProductInspectorPage() {
   const params = useParams<{ id: string }>();
@@ -45,6 +62,8 @@ export default function ProductInspectorPage() {
   const settings = account.data?.account.settings;
 
   const [checking, setChecking] = useState(false);
+  const [scope, setScope] = useState<CheckScope>("due");
+  const [progress, setProgress] = useState<CheckRunRecord | null>(null);
   const [result, setResult] = useState<CheckResult | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [drafting, setDrafting] = useState(false);
@@ -64,19 +83,30 @@ export default function ProductInspectorPage() {
   const openAlerts = useMemo(() => (data ? sortAlerts(data.alerts.filter((a) => a.status === "new"), productMap, settings) : []), [data, productMap, settings]);
   const top = openAlerts[0] ?? null;
 
-  async function runCheck() {
+  // The check request blocks until every rule ran; a run id chosen here lets the
+  // page poll live progress from GET /api/runs/[id] while it waits.
+  async function runCheck(which: CheckScope = scope) {
     if (!id) return;
+    const runId = newRunId();
     setChecking(true);
     setActionError(null);
     setResult(null);
+    setProgress(null);
+    const poll = window.setInterval(() => {
+      api<{ run: CheckRunRecord }>(`/api/runs/${runId}`)
+        .then((r) => setProgress(r.run))
+        .catch(() => undefined); // 404 until the first progress write lands
+    }, 2000);
     try {
-      const r = await api<CheckResult>(`/api/products/${id}/check`, { method: "POST", json: { force: false, max_rules: 4 } });
+      const r = await api<CheckResult>(`/api/products/${id}/check`, { method: "POST", json: { scope: which, force: false, run_id: runId } });
       setResult(r);
       refresh();
     } catch (e) {
       setActionError((e as Error).message);
     } finally {
+      window.clearInterval(poll);
       setChecking(false);
+      setProgress(null);
     }
   }
 
@@ -218,8 +248,17 @@ export default function ProductInspectorPage() {
         </Banner>
       ) : null}
       {checking ? (
-        <Banner tone="info" title="Checking official sources">
-          <p>Searching each due rule on its official domains, reading the pages, and deciding whether the change touches this product. This takes 20 to 60 seconds.</p>
+        <Banner tone="info" title={progress && progress.total > 0 ? `Checked ${progress.done} of ${progress.total}${progress.current.length ? `: ${Array.from(new Set(progress.current)).join(", ")}` : ""}` : "Checking official sources"}>
+          <p aria-live="polite">
+            {progress && progress.total === 0
+              ? "Nothing is due. Choose Every rule to recheck everything."
+              : progress
+                ? progress.items
+                    .filter((i) => i.status !== "queued")
+                    .map((i) => `${i.title}: ${i.status === "checking" ? "reading" : i.status}`)
+                    .join(". ")
+                : "Searching each rule on its official domains, reading the pages, and deciding whether the change touches this product. Rules run three at a time, about 20 seconds each."}
+          </p>
         </Banner>
       ) : null}
       {result ? (
@@ -372,7 +411,7 @@ export default function ProductInspectorPage() {
                 </StatusPill>
               </div>
               <div>
-                <SrButton variant="primary" onClick={runCheck} loading={checking}>
+                <SrButton variant="primary" onClick={() => void runCheck()} loading={checking}>
                   Run a check now
                 </SrButton>
               </div>
@@ -537,15 +576,21 @@ export default function ProductInspectorPage() {
               />
             ) : null}
             <div className="sr-grid-2 sr-grid-2--always sr-grid-2--tight">
-              <SrButton size="lg" onClick={runCheck} loading={checking}>
+              <SrButton size="lg" onClick={() => void runCheck()} loading={checking}>
                 Run check now
               </SrButton>
               <SrButton size="lg" onClick={exportDossier}>
                 Export dossier
               </SrButton>
             </div>
+            <div className="sr-row sr-row--between" style={{ gap: 8 }}>
+              <span className="sr-xs">Check</span>
+              <div className="sr-grow">
+                <Select label="Check scope" labelHidden options={SCOPE_OPTIONS} value={scope} onChange={(v) => setScope(v as CheckScope)} disabled={checking} />
+              </div>
+            </div>
             <p className="sr-xs" style={{ textAlign: "center" }}>
-              {top && suggested != null ? "Drafting copies the price and marks the alert done." : dueCount ? `${dueCount} rule${dueCount === 1 ? "" : "s"} due. A check takes 20 to 60 seconds.` : "A check reads each official source again and quotes what changed."}
+              {top && suggested != null ? "Drafting copies the price and marks the alert done." : dueCount ? `${dueCount} of ${rules.length} rule${rules.length === 1 ? "" : "s"} due. Unchanged sources skip the model.` : "Nothing due. Every rule choice rereads all official sources."}
             </p>
           </SrCard>
 

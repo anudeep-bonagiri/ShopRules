@@ -504,6 +504,41 @@ export async function alertExistsForRuleHash(ruleId: string, hash: string, accou
   return ws.alerts.some((a) => a.rule_id === ruleId && a.impact?.hash === hash);
 }
 
+// Check runs: live progress for one check, written as its own small blob so the
+// product page (or the extension) can poll it while the check is still running.
+// Not part of the workspace document, so progress writes never contend with it.
+
+export type CheckScope = "all" | "due" | "tariff" | "safety" | "tax" | "policy";
+export type CheckItemStatus = "queued" | "checking" | "clear" | "unchanged" | "alert" | "error";
+
+export interface CheckRunRecord {
+  id: string;
+  account_id: string;
+  product_id: string;
+  scope: CheckScope;
+  status: "running" | "done" | "failed";
+  total: number;
+  done: number;
+  /** Domains being read right now, for the "Checked 5 of 11: cpsc.gov" line. */
+  current: string[];
+  items: Array<{ rule_id: string; title: string; family: RuleFamily; domain: string; status: CheckItemStatus; alert_id?: string; error?: string }>;
+  conflicts: number;
+  started_at: string;
+  finished_at: string | null;
+}
+
+const checkRunPath = (accountId: string, id: string) => `checkruns/${accountId}/${id}.json`;
+
+export async function saveCheckRun(run: CheckRunRecord): Promise<void> {
+  requireDb();
+  await put(checkRunPath(run.account_id, run.id), JSON.stringify(run), { ...ACCESS, addRandomSuffix: false, allowOverwrite: true, contentType: "application/json", cacheControlMaxAge: 0 });
+}
+
+export async function getCheckRun(accountId: string, id: string): Promise<CheckRunRecord | null> {
+  if (!/^[A-Za-z0-9_-]{8,64}$/.test(id)) return null;
+  return readBlob<CheckRunRecord>(checkRunPath(accountId, id));
+}
+
 // Runs (cost receipt)
 
 export async function insertRun(row: Omit<RunRow, "id" | "created_at">): Promise<void> {

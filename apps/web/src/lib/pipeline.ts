@@ -3,6 +3,9 @@ import { ApiError } from "./account";
 import {
   alertExistsForRuleHash,
   applyCheckBatch,
+  saveCheckRun,
+  type CheckRunRecord,
+  type CheckScope,
   insertProductBundle,
   insertRun,
   insertSkill,
@@ -224,6 +227,7 @@ export interface CheckResult {
   skipped_unchanged: number;
   meter: Meter;
   errors: string[];
+  run_id: string;
 }
 
 interface RuleOutcome {
@@ -232,29 +236,89 @@ interface RuleOutcome {
   alert?: AlertRow;
 }
 
-export async function runChecks(account: AccountRow, product: ProductRow, opts: { force?: boolean; maxRules?: number } = {}): Promise<CheckResult> {
+export const CHECK_SCOPES: CheckScope[] = ["due", "all", "tariff", "safety", "tax", "policy"];
+export const MAX_RULES_PER_CHECK = 12;
+
+export function isCheckScope(v: unknown): v is CheckScope {
+  return typeof v === "string" && (CHECK_SCOPES as string[]).includes(v);
+}
+
+export function ruleIsDue(r: Pick<RuleRow, "last_run_at" | "cadence_hours">, now = Date.now()): boolean {
+  if (!r.last_run_at) return true;
+  return now - new Date(r.last_run_at).getTime() > r.cadence_hours * 3600 * 1000;
+}
+
+export interface RunChecksOptions {
+  /** due: every rule whose cadence elapsed (default). all: every rule. A family: every rule of that family. */
+  scope?: CheckScope;
+  /** Skip the source-hash dedupe and call the model even when nothing changed. Costs money; off by default. */
+  force?: boolean;
+  maxRules?: number;
+  /** Client-chosen id so the caller can poll GET /api/runs/[id] while this request is still running. */
+  runId?: string;
+}
+
+export async function runChecks(account: AccountRow, product: ProductRow, opts: RunChecksOptions = {}): Promise<CheckResult> {
   const meter = newMeter();
+  const scope: CheckScope = opts.scope ?? "due";
   const rules = await listRules(product.id, account.id);
   const now = Date.now();
-  const due = rules.filter((r) => {
-    if (opts.force) return true;
-    if (!r.last_run_at) return true;
-    return now - new Date(r.last_run_at).getTime() > r.cadence_hours * 3600 * 1000;
+  const selected = rules.filter((r) => {
+    if (scope === "all") return true;
+    if (scope === "due") return ruleIsDue(r, now);
+    return r.family === scope;
   });
   // Never-run rules first, then the oldest; bound the work per request.
-  due.sort((a, b) => (a.last_run_at ? new Date(a.last_run_at).getTime() : 0) - (b.last_run_at ? new Date(b.last_run_at).getTime() : 0));
-  const batch = due.slice(0, opts.maxRules ?? 4);
+  selected.sort((a, b) => (a.last_run_at ? new Date(a.last_run_at).getTime() : 0) - (b.last_run_at ? new Date(b.last_run_at).getTime() : 0));
+  const batch = selected.slice(0, Math.min(opts.maxRules ?? MAX_RULES_PER_CHECK, MAX_RULES_PER_CHECK));
   const skills = await listSkills(account.id, product.id);
+
+  // Live progress record. Best effort: a storage hiccup must not fail the check.
+  const run: CheckRunRecord = {
+    id: opts.runId && /^[A-Za-z0-9_-]{8,64}$/.test(opts.runId) ? opts.runId : newId(),
+    account_id: account.id,
+    product_id: product.id,
+    scope,
+    status: "running",
+    total: batch.length,
+    done: 0,
+    current: [],
+    items: batch.map((r) => ({ rule_id: r.id, title: r.title, family: r.family, domain: r.include_domains[0] ?? "official source", status: "queued" as const })),
+    conflicts: 0,
+    started_at: new Date().toISOString(),
+    finished_at: null,
+  };
+  const progress = async () => {
+    try {
+      await saveCheckRun(run);
+    } catch (err) {
+      console.error("[shop-rules] progress write failed", err instanceof Error ? err.message : err);
+    }
+  };
+  const item = (rule: RuleRow) => run.items.find((i) => i.rule_id === rule.id)!;
+  await progress();
 
   const errors: string[] = [];
   const outcomes = await mapLimit(batch, 3, async (rule) => {
+    item(rule).status = "checking";
+    run.current = run.items.filter((i) => i.status === "checking").map((i) => i.domain);
+    void progress();
     try {
-      return { rule, outcome: await checkRule(account, product, rule, skills, meter, Boolean(opts.force)) };
+      const outcome = await checkRule(account, product, rule, skills, meter, Boolean(opts.force));
+      item(rule).status = outcome.status === "alert" ? "alert" : outcome.status === "unchanged" ? "unchanged" : "clear";
+      if (outcome.alert) item(rule).alert_id = outcome.alert.id;
+      return { rule, outcome };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       errors.push(`${rule.title}: ${msg}`);
       console.error("[shop-rules] rule failed", rule.key, msg);
+      item(rule).status = "error";
+      item(rule).error = msg.slice(0, 200);
       return { rule, outcome: null };
+    } finally {
+      run.done += 1;
+      run.current = run.items.filter((i) => i.status === "checking").map((i) => i.domain);
+      await progress();
     }
   });
 
@@ -269,10 +333,21 @@ export async function runChecks(account: AccountRow, product: ProductRow, opts: 
     if (outcome.alert) alerts.push(outcome.alert);
   }
 
-  const saved = await applyCheckBatch(account.id, { productId: product.id, lastCheckedAt: stamp, rulePatches, alerts });
+  let saved: AlertRow[] = [];
+  try {
+    saved = await applyCheckBatch(account.id, { productId: product.id, lastCheckedAt: stamp, rulePatches, alerts });
+  } catch (err) {
+    run.status = "failed";
+    run.finished_at = new Date().toISOString();
+    await progress();
+    throw err;
+  }
+  run.status = "done";
+  run.finished_at = new Date().toISOString();
+  await progress();
   for (const a of saved) await notifyTelegram(account, product, a);
   await recordRun(account, product.id, "check", meter);
-  return { alerts: saved, checked: batch.length, skipped_unchanged: skipped, meter, errors };
+  return { alerts: saved, checked: batch.length, skipped_unchanged: skipped, meter, errors, run_id: run.id };
 }
 
 async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow, skills: SkillRow[], meter: Meter, force: boolean): Promise<RuleOutcome> {

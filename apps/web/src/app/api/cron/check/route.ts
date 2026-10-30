@@ -20,7 +20,7 @@ async function run(req: Request) {
         if (Date.now() - started > 240_000) return json({ ...summary, partial: true });
         summary.products += 1;
         try {
-          const r = await runChecks(account, product, { maxRules: 3 });
+          const r = await runChecks(account, product, { scope: "due", maxRules: 3 });
           summary.checked += r.checked;
           summary.alerts += r.alerts.length;
           summary.errors += r.errors.length;
