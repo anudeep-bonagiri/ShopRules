@@ -73,7 +73,7 @@ async function runCase(c: Case): Promise<Row> {
     : await chatJSON(tier, { name: "rule_check", purpose: `eval ${c.id}`, schema: RuleCheckSchema, maxTokens: 1600, temperature: 0.1, system: prompt.system, user: prompt.user }, meter);
   if (raw.impact.effective_date === today) raw.impact.effective_date = null;
   const verified = verifyClaims(raw.claims, c.sources.map((s) => ({ url: s.url, text: s.text })));
-  const audit = auditRuleCheck({ check: raw, verified: verified.claims, rule: c.rule, product, previous: [], today });
+  const audit = auditRuleCheck({ check: raw, verified: verified.claims, rule: c.rule, product, previous: [], sources: c.sources.map((s) => ({ url: s.url, text: s.text })), today });
   const finalRelevance = audit.drop ? "no_change" : audit.check.relevance;
   const finalRate = audit.drop ? null : audit.check.impact.tariff_rate_change_pct;
   const finalDate = audit.drop ? null : audit.check.impact.effective_date;

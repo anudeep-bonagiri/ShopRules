@@ -44,6 +44,8 @@ export interface AuditInput {
     profile: { category: string; product_type: string; keywords: string[]; materials: string[]; origin_country: string | null; hts_candidates: Array<{ code: string; description: string }> };
   };
   previous: PreviousAlertLike[];
+  /** Full extracted source texts, so a short quote can be read with its surrounding sentence. */
+  sources?: Array<{ url: string; text: string }>;
   today: string; // YYYY-MM-DD
 }
 
@@ -134,6 +136,37 @@ export function headingsIn(text: string): string[] {
   const re2 = /\b(\d{4})\.\d{2}(?:\.\d{2})?\b/g;
   while ((m = re2.exec(text))) out.add(m[1]);
   return Array.from(out);
+}
+
+/**
+ * The passage around a quote in its source (about 400 characters before and
+ * 200 after), so the subject check sees "heading 9405 ... products of China"
+ * even when the model quoted only the rate sentence. Falls back to the quote.
+ */
+export function quoteContext(quote: string, sources: Array<{ url: string; text: string }>, preferUrl?: string | null): string {
+  const probe = quote.trim().slice(0, 60).toLowerCase();
+  if (probe.length < 15) return quote;
+  const ordered = preferUrl ? [...sources.filter((s) => s.url === preferUrl), ...sources.filter((s) => s.url !== preferUrl)] : sources;
+  for (const s of ordered) {
+    const hay = s.text.toLowerCase();
+    const at = hay.indexOf(probe);
+    if (at >= 0) return s.text.slice(Math.max(0, at - 400), Math.min(s.text.length, at + quote.length + 200));
+  }
+  return quote;
+}
+
+/**
+ * Drops sentences that say what a notice does NOT cover ("does not change
+ * requirements for toys", "footwear of heading 6403 is not affected", "products
+ * of other countries ... are not covered"), so a product named only in an
+ * exclusion does not count as the subject.
+ */
+export function stripNegatedClauses(text: string): string {
+  const NEG = /\b(?:does not|do not|did not|will not|is not|are not|not)\s+(?:apply|applies|change|affect|affected|cover|covered|include|included|modify|modified|subject|eligible|extend)\b|\b(?:except|excluding|other than|exempt from|outside the scope|unaffected|remain(?:s)? (?:at|unchanged))\b|\bno other\b/i;
+  return text
+    .split(/(?<=[.;])\s+/)
+    .filter((sentence) => !NEG.test(sentence))
+    .join(" ");
 }
 
 /** True when the rate is stated directly or is the difference of two stated rates. */
@@ -259,11 +292,12 @@ export function auditRuleCheck(input: AuditInput): AuditResult {
   const GENERIC = new Set(["standa", "safety", "duty", "duties", "tariff", "sectio", "rule", "rules", "requir", "policy", "thresh", "nexus", "sales", "econom", "seller", "remote", "market", "state", "collec", "produc", "import", "additi", "notice", "change", "update", "mandat"]);
   const ruleTerms = new Set<string>([...tokens(rule.title), ...tokens(rule.query)].filter((t) => !GENERIC.has(t) && !/^\d{4}$/.test(t)));
   if (rule.state) ruleTerms.add(rule.state.toLowerCase());
-  // Only verified quotes count: they are source text, while the headline and
-  // claim prose are the model's own words and can echo the rule's vocabulary.
+  // Only verified quotes count, read with their surrounding source passage. The
+  // headline and claim prose are the model's own words and can echo the rule's
+  // vocabulary, so they are not evidence of subject.
   const body = verified
     .filter((c) => c.backed)
-    .map((c) => c.quote)
+    .map((c) => stripNegatedClauses(input.sources?.length ? quoteContext(c.quote, input.sources, c.matched_url ?? c.source_url) : c.quote))
     .join(" \n ")
     .toLowerCase();
   const bodyTokens = tokens(body);

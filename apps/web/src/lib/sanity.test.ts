@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { auditRuleCheck, headingsIn, historyContext, impliedChangeFromLevels, percentsIn, rateSupportedByText, type AuditInput } from "./sanity.ts";
+import { auditRuleCheck, headingsIn, quoteContext, stripNegatedClauses, historyContext, impliedChangeFromLevels, percentsIn, rateSupportedByText, type AuditInput } from "./sanity.ts";
 
 const lamp: AuditInput["product"] = {
   title: "USB-C Rechargeable LED Desk Lamp with Lithium Battery",
@@ -183,4 +183,25 @@ test("a universal tariff with no heading or country named is kept as unconfirmed
   assert.equal(r.drop, false);
   assert.equal(r.check.relevance, "might_affect");
   assert.equal(r.check.impact.tariff_rate_change_pct, 10);
+});
+
+test("a short rate quote is read with its surrounding source sentence for the subject check", () => {
+  const text = "Notice of Modification. For products of China classified under heading 9405 (lamps and lighting fittings), the additional duty will increase from 25 percent to 37.5 percent ad valorem effective January 1, 2026. Importers should file accordingly.";
+  const q = "the additional duty will increase from 25 percent to 37.5 percent ad valorem effective January 1, 2026";
+  assert.match(quoteContext(q, [{ url: "https://ustr.gov/n", text }]), /heading 9405/);
+  const i = base({ sources: [{ url: "https://ustr.gov/notice", text }] });
+  i.check.claims[0]!.quote = q;
+  i.verified[0]!.quote = q;
+  i.verified[0]!.matched_url = "https://ustr.gov/notice";
+  const r = auditRuleCheck(i);
+  assert.equal(r.drop, false);
+  assert.equal(r.check.relevance, "affects", JSON.stringify(r.issues));
+});
+
+test("exclusion sentences do not make a product the subject", () => {
+  const t = "Cribs made after March 1, 2026 must meet F1169-25. This rule applies to full-size cribs only and does not change requirements for toys, play yards, or bassinets. Footwear of heading 6403 is not affected.";
+  const out = stripNegatedClauses(t);
+  assert.match(out, /Cribs made after/);
+  assert.doesNotMatch(out, /toys/);
+  assert.doesNotMatch(out, /6403/);
 });

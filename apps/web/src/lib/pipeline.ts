@@ -567,7 +567,7 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
 
   // Deterministic guardrails: numbers must be in the quotes, actions must fit the
   // rule, the quotes must be about this product, and repeats are dropped.
-  const audit = auditRuleCheck({ check: raw, verified: verifiedRaw.claims, rule, product, previous: previousAlerts, today });
+  const audit = auditRuleCheck({ check: raw, verified: verifiedRaw.claims, rule, product, previous: previousAlerts, sources, today });
   const check = audit.check;
   const backedCount = audit.verified.filter((c) => c.backed).length;
   const verified = { claims: audit.verified, proposed: audit.verified.length, backed: backedCount, rejected: audit.verified.length - backedCount };
