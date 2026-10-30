@@ -20,7 +20,7 @@ The browser app uses the cookie; the extension uses the header. Both resolve to 
 Returns `{ ok: true, tavily_mode: "keyed" | "keyless", nemotron_configured: boolean, version: string }`.
 
 ### `GET /api/account`
-Returns `{ account: { id, token, telegram_configured, settings } }`. Settings: `{ ship_to_states: string[], target_margin_pct: number, currency: string }`.
+Returns `{ account: { id, token, telegram_configured, settings } }`. Settings: `{ ship_to_states: string[], target_margin_pct: number, unit_cost_pct: number, units_per_week: number, state_sales: Record<string, number>, currency: string }`.
 
 ### `PATCH /api/account`
 Body: partial `{ settings, telegram_chat_id }`. Returns the updated account.
@@ -55,6 +55,9 @@ Body: `{ status: "dismissed" | "actioned" | "new", reason?: string }`. A dismiss
 
 ### `POST /api/compare`
 Body: `{ title: string, price?: number, marketplace?: string, url?: string }`. Tavily Search across Amazon, Etsy, Walmart, and eBay for the same product, Nemotron Nano parses prices. Returns `CompetitorListings`: `{ listings: [{ title, marketplace, price, currency, url, seller }], price_position, note, meter }`.
+
+### `GET /api/rules`
+Returns `{ rules: Rule[] }` for every product in the workspace, each with `product_title`.
 
 ### `GET /api/receipt`
 Cost receipt for the account: `{ runs: Run[], totals: { tavily_calls, tavily_credits, llm_cost_usd, all_ultra_cost_usd, saved_usd, saved_pct }, by_tier: {...} }`.

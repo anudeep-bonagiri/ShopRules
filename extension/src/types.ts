@@ -124,7 +124,30 @@ export interface CompetitorListing {
   seller: string | null;
 }
 
+export interface AccountSettings {
+  ship_to_states?: string[];
+  target_margin_pct?: number;
+  currency?: string;
+  unit_cost_pct?: number;
+  units_per_week?: number;
+  state_sales?: Record<string, number>;
+}
+
 // Responses
+
+export interface AccountResponse {
+  account: {
+    id: string;
+    token: string;
+    telegram_configured: boolean;
+    settings: AccountSettings;
+  };
+}
+
+export interface AlertStatusResponse {
+  alert: Alert;
+  skill?: Skill;
+}
 
 export interface HealthResponse {
   ok: boolean;
@@ -227,6 +250,8 @@ export type BgRequest =
   | { type: "alerts" }
   | { type: "health" }
   | { type: "check"; id: string; force?: boolean }
+  | { type: "account" }
+  | { type: "alertStatus"; id: string; status: AlertStatus; reason?: string }
   | { type: "settings" }
   | { type: "open-popup" }
   | { type: "poll" };

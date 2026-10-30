@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { zodResponseFormat } from "openai/helpers/zod";
+import type { ChatCompletionCreateParamsNonStreaming } from "openai/resources/chat/completions";
 import type { ZodTypeAny, z } from "zod";
 import type { Meter } from "./schemas";
 
@@ -82,20 +83,27 @@ export interface ChatJsonOptions<S extends ZodTypeAny> {
   purpose: string;
   maxTokens?: number;
   temperature?: number;
+  thinking?: boolean;
 }
 
 export async function chatJSON<S extends ZodTypeAny>(tier: Tier, opts: ChatJsonOptions<S>, meter?: Meter): Promise<z.infer<S>> {
   const openai = getClient();
   const model = MODELS[tier];
   const started = Date.now();
-  const base = {
+  // Nemotron 3 is a reasoning model. With thinking on, a long prompt can spend
+  // the whole completion budget on reasoning and return empty content, so
+  // thinking is off by default and the prompts carry the structure instead.
+  // Set NEMOTRON_ULTRA_THINKING=1 to let Ultra reason before the rule decision.
+  const thinking = opts.thinking ?? (tier === "ultra" && process.env.NEMOTRON_ULTRA_THINKING === "1");
+  const base: Record<string, unknown> = {
     model,
     temperature: opts.temperature ?? 0.2,
-    max_tokens: opts.maxTokens ?? 1800,
+    max_tokens: opts.maxTokens ?? (thinking ? 6000 : 1800),
     messages: [
-      { role: "system" as const, content: opts.system },
-      { role: "user" as const, content: opts.user },
+      { role: "system", content: opts.system },
+      { role: "user", content: opts.user },
     ],
+    chat_template_kwargs: { enable_thinking: thinking },
   };
 
   let content = "";
@@ -104,11 +112,12 @@ export async function chatJSON<S extends ZodTypeAny>(tier: Tier, opts: ChatJsonO
     const res = await openai.chat.completions.create({
       ...base,
       response_format: zodResponseFormat(opts.schema, opts.name),
-    });
+    } as unknown as ChatCompletionCreateParamsNonStreaming);
     content = res.choices[0]?.message?.content ?? "";
     usage = res.usage ?? undefined;
+    if (!content.trim()) throw new Error("empty content from json_schema mode");
   } catch (err) {
-    // Some models reject strict json_schema; fall back to json_object with the schema in the prompt.
+    // Some models reject strict json_schema or return nothing; fall back to json_object with the schema in the prompt.
     const res = await openai.chat.completions.create({
       ...base,
       messages: [
@@ -116,10 +125,10 @@ export async function chatJSON<S extends ZodTypeAny>(tier: Tier, opts: ChatJsonO
         { role: "user", content: opts.user },
       ],
       response_format: { type: "json_object" },
-    });
+    } as unknown as ChatCompletionCreateParamsNonStreaming);
     content = res.choices[0]?.message?.content ?? "";
     usage = res.usage ?? undefined;
-    if (!content) throw err;
+    if (!content.trim()) throw err;
   }
 
   const ms = Date.now() - started;
@@ -163,7 +172,8 @@ export async function chatText(tier: Tier, system: string, user: string, meter?:
       { role: "system", content: system },
       { role: "user", content: user },
     ],
-  });
+    chat_template_kwargs: { enable_thinking: false },
+  } as unknown as ChatCompletionCreateParamsNonStreaming);
   const ms = Date.now() - started;
   const promptTokens = res.usage?.prompt_tokens ?? 0;
   const completionTokens = res.usage?.completion_tokens ?? 0;

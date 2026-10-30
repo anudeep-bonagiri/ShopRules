@@ -3,8 +3,10 @@ import type { Marketplace, ProductProfile, RuleFamily, VerifiedClaim } from "./s
 import type { RuleSpec } from "./rules-catalog";
 
 // Server-only data layer. Each workspace (account) is one private JSON document
-// in Vercel Blob, read fresh on every request and written back with an ETag
-// precondition so two judges clicking at once cannot clobber each other.
+// in Vercel Blob. Every write creates a new immutable version file under
+// accounts/<id>/ and the newest version is resolved through the listing API,
+// which is consistent right after a write (overwriting one pathname is not:
+// reads can lag by seconds). Old versions are pruned in the background.
 // Swap this file for a SQL implementation if you self-host; apps/web/supabase/
 // migration.sql has the equivalent schema.
 
@@ -12,7 +14,7 @@ export interface AccountRow {
   id: string;
   token: string;
   telegram_chat_id: string | null;
-  settings: { ship_to_states?: string[]; target_margin_pct?: number; currency?: string; unit_cost_pct?: number };
+  settings: { ship_to_states?: string[]; target_margin_pct?: number; currency?: string; unit_cost_pct?: number; units_per_week?: number; state_sales?: Record<string, number> };
   created_at: string;
 }
 
@@ -110,6 +112,7 @@ interface Workspace {
 
 const ACCESS = { access: "private" as const };
 const MAX_RUNS = 400;
+const KEEP_VERSIONS = 3;
 
 export function dbConfigured(): boolean {
   return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
@@ -127,72 +130,95 @@ function uid(): string {
   return crypto.randomUUID();
 }
 
+export function newId(): string {
+  return uid();
+}
+
 export function newToken(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(18));
   return "sr_live_" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-const accountPath = (id: string) => `accounts/${id}.json`;
+const accountDir = (id: string) => `accounts/${id}/`;
+const legacyPath = (id: string) => `accounts/${id}.json`;
 const tokenPath = (token: string) => `tokens/${token}.json`;
 
-async function readJson<T>(pathname: string): Promise<{ doc: T | null; etag: string | null }> {
+function versionName(id: string): string {
+  const stamp = String(Date.now()).padStart(14, "0");
+  const rand = Math.random().toString(36).slice(2, 6);
+  return `${accountDir(id)}${stamp}-${rand}.json`;
+}
+
+async function readBlob<T>(pathOrUrl: string): Promise<T | null> {
   requireDb();
   try {
-    const result = await get(pathname, { ...ACCESS, useCache: false });
-    if (!result || !result.stream) return { doc: null, etag: null };
+    const result = await get(pathOrUrl, { ...ACCESS, useCache: false });
+    if (!result || !result.stream) return null;
     const text = await new Response(result.stream).text();
-    return { doc: JSON.parse(text) as T, etag: result.headers?.get?.("etag") ?? null };
+    return JSON.parse(text) as T;
   } catch (err) {
     const status = (err as { status?: number }).status;
     const name = (err as { name?: string }).name ?? "";
-    if (status === 404 || /NotFound/i.test(name)) return { doc: null, etag: null };
+    if (status === 404 || /NotFound/i.test(name)) return null;
     throw err;
   }
 }
 
-async function writeJson(pathname: string, doc: unknown, etag: string | null): Promise<void> {
+async function listVersions(id: string): Promise<Array<{ pathname: string; url: string }>> {
   requireDb();
-  await put(pathname, JSON.stringify(doc), {
-    ...ACCESS,
-    addRandomSuffix: false,
-    allowOverwrite: true,
-    contentType: "application/json",
-    cacheControlMaxAge: 0,
-    ...(etag ? { ifMatch: etag } : {}),
-  });
+  const out: Array<{ pathname: string; url: string }> = [];
+  let cursor: string | undefined;
+  do {
+    const page = await list({ prefix: accountDir(id), cursor, limit: 1000 });
+    for (const b of page.blobs) out.push({ pathname: b.pathname, url: b.url });
+    cursor = page.hasMore ? page.cursor : undefined;
+  } while (cursor);
+  out.sort((a, b) => a.pathname.localeCompare(b.pathname));
+  return out;
 }
 
-async function loadWorkspace(accountId: string): Promise<{ ws: Workspace | null; etag: string | null }> {
-  const { doc, etag } = await readJson<Workspace>(accountPath(accountId));
-  return { ws: doc, etag };
+async function loadWorkspace(id: string): Promise<Workspace | null> {
+  const versions = await listVersions(id);
+  const newest = versions.at(-1);
+  if (newest) return readBlob<Workspace>(newest.url);
+  // Workspaces created before versioning lived at accounts/<id>.json.
+  return readBlob<Workspace>(legacyPath(id));
+}
+
+async function writeWorkspace(id: string, ws: Workspace): Promise<void> {
+  requireDb();
+  ws.version = (ws.version ?? 0) + 1;
+  await put(versionName(id), JSON.stringify(ws), { ...ACCESS, addRandomSuffix: false, contentType: "application/json", cacheControlMaxAge: 0 });
+  void pruneVersions(id).catch(() => undefined);
+}
+
+async function pruneVersions(id: string): Promise<void> {
+  const versions = await listVersions(id);
+  if (versions.length <= KEEP_VERSIONS + 3) return;
+  const stale = versions.slice(0, versions.length - KEEP_VERSIONS);
+  await del(stale.map((v) => v.url));
 }
 
 async function mutate<T>(accountId: string, fn: (ws: Workspace) => T | Promise<T>): Promise<T> {
   let lastErr: unknown = null;
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const { ws, etag } = await loadWorkspace(accountId);
-    if (!ws) throw new Error(`Workspace ${accountId} not found`);
-    const result = await fn(ws);
-    ws.version = (ws.version ?? 0) + 1;
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      await writeJson(accountPath(accountId), ws, etag);
+      const ws = await loadWorkspace(accountId);
+      if (!ws) throw new Error(`Workspace ${accountId} not found`);
+      const result = await fn(ws);
+      await writeWorkspace(accountId, ws);
       return result;
     } catch (err) {
       lastErr = err;
-      const status = (err as { status?: number }).status;
-      const name = (err as { name?: string }).name ?? "";
-      if (status === 412 || /Precondition/i.test(name)) {
-        await new Promise((r) => setTimeout(r, 120 * (attempt + 1)));
-        continue;
-      }
-      throw err;
+      if (err instanceof Error && /not found/i.test(err.message)) throw err;
+      await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
     }
   }
-  throw lastErr instanceof Error ? lastErr : new Error("Workspace write conflict");
+  throw lastErr instanceof Error ? lastErr : new Error("Workspace write failed");
 }
 
 async function requireWorkspace(accountId: string): Promise<Workspace> {
-  const { ws } = await loadWorkspace(accountId);
+  const ws = await loadWorkspace(accountId);
   if (!ws) throw new Error(`Workspace ${accountId} not found`);
   return ws;
 }
@@ -200,26 +226,26 @@ async function requireWorkspace(accountId: string): Promise<Workspace> {
 // Accounts
 
 export async function getOrCreateAccount(id: string): Promise<AccountRow> {
-  const { ws } = await loadWorkspace(id);
+  const ws = await loadWorkspace(id);
   if (ws) return ws.account;
   const account: AccountRow = {
     id,
     token: newToken(),
     telegram_chat_id: null,
-    settings: { ship_to_states: ["TX", "CA", "NY", "FL"], target_margin_pct: 35, currency: "USD", unit_cost_pct: 45 },
+    settings: { ship_to_states: ["TX", "CA", "NY", "FL"], target_margin_pct: 35, currency: "USD", unit_cost_pct: 45, units_per_week: 20, state_sales: {} },
     created_at: now(),
   };
-  const fresh: Workspace = { version: 1, account, products: [], rules: [], alerts: [], runs: [], skills: [], prices: [] };
-  await writeJson(accountPath(id), fresh, null);
-  await writeJson(tokenPath(account.token), { account_id: id }, null);
+  const fresh: Workspace = { version: 0, account, products: [], rules: [], alerts: [], runs: [], skills: [], prices: [] };
+  await writeWorkspace(id, fresh);
+  await put(tokenPath(account.token), JSON.stringify({ account_id: id }), { ...ACCESS, addRandomSuffix: false, contentType: "application/json", cacheControlMaxAge: 0 });
   return account;
 }
 
 export async function getAccountByToken(token: string): Promise<AccountRow | null> {
   if (!/^sr_live_[a-f0-9]{36}$/.test(token)) return null;
-  const { doc } = await readJson<{ account_id: string }>(tokenPath(token));
+  const doc = await readBlob<{ account_id: string }>(tokenPath(token));
   if (!doc) return null;
-  const { ws } = await loadWorkspace(doc.account_id);
+  const ws = await loadWorkspace(doc.account_id);
   return ws?.account ?? null;
 }
 
@@ -233,23 +259,29 @@ export async function updateAccount(id: string, patch: Partial<Pick<AccountRow, 
 
 export async function listAccountIds(): Promise<string[]> {
   requireDb();
-  const ids: string[] = [];
+  const ids = new Set<string>();
   let cursor: string | undefined;
   do {
-    const page = await list({ ...ACCESS, prefix: "accounts/", cursor, limit: 500 });
+    const page = await list({ prefix: "accounts/", mode: "folded", cursor, limit: 1000 });
+    for (const f of page.folders ?? []) {
+      const m = f.match(/^accounts\/([^/]+)\/$/);
+      if (m) ids.add(m[1]);
+    }
     for (const b of page.blobs) {
       const m = b.pathname.match(/^accounts\/([^/]+)\.json$/);
-      if (m) ids.push(m[1]);
+      if (m) ids.add(m[1]);
     }
     cursor = page.hasMore ? page.cursor : undefined;
   } while (cursor);
-  return ids;
+  return Array.from(ids);
 }
 
 export async function deleteAccount(id: string): Promise<void> {
-  const { ws } = await loadWorkspace(id);
-  if (!ws) return;
-  await del([accountPath(id), tokenPath(ws.account.token)]);
+  const ws = await loadWorkspace(id);
+  const versions = await listVersions(id);
+  const urls = versions.map((v) => v.url);
+  if (ws) urls.push(tokenPath(ws.account.token));
+  if (urls.length) await del(urls);
 }
 
 // Products
@@ -285,6 +317,24 @@ export async function insertProduct(row: Omit<ProductRow, "id" | "created_at" | 
     if (dup) return dup;
     ws.products.push(product);
     return product;
+  });
+}
+
+// Product, first price point, and seeded rules in one workspace write.
+export async function insertProductBundle(
+  row: Omit<ProductRow, "id" | "created_at" | "last_checked_at" | "open_alerts">,
+  price: { price: number; currency: string | null; source: string } | null,
+  specs: RuleSpec[],
+): Promise<{ product: ProductRow; rules: RuleRow[]; existing: boolean }> {
+  const product: ProductRow = { ...row, id: uid(), created_at: now(), last_checked_at: null };
+  const rules: RuleRow[] = specs.map((s) => ({ ...s, id: uid(), account_id: row.account_id, product_id: product.id, last_run_at: null, last_hash: null, last_headline: null, created_at: now() }));
+  return mutate(row.account_id, (ws) => {
+    const dup = ws.products.find((p) => p.url === row.url);
+    if (dup) return { product: dup, rules: ws.rules.filter((r) => r.product_id === dup.id), existing: true };
+    ws.products.push(product);
+    ws.rules.push(...rules);
+    if (price) ws.prices.push({ id: uid(), product_id: product.id, price: price.price, currency: price.currency, source: price.source, at: now() });
+    return { product, rules, existing: false };
   });
 }
 
@@ -379,6 +429,27 @@ export async function updateAlert(id: string, patch: Partial<Pick<AlertRow, "sta
   });
 }
 
+// One write for a whole check run: rule bookkeeping, new alerts, last_checked_at.
+export interface CheckBatch {
+  productId: string;
+  lastCheckedAt: string;
+  rulePatches: Array<{ id: string; patch: Partial<Pick<RuleRow, "last_run_at" | "last_hash" | "last_headline">> }>;
+  alerts: AlertRow[];
+}
+
+export async function applyCheckBatch(accountId: string, batch: CheckBatch): Promise<AlertRow[]> {
+  return mutate(accountId, (ws) => {
+    for (const { id, patch } of batch.rulePatches) {
+      const r = ws.rules.find((x) => x.id === id);
+      if (r) Object.assign(r, patch);
+    }
+    for (const a of batch.alerts) if (!ws.alerts.some((x) => x.id === a.id)) ws.alerts.push(a);
+    const p = ws.products.find((x) => x.id === batch.productId);
+    if (p) p.last_checked_at = batch.lastCheckedAt;
+    return decorate(ws, batch.alerts);
+  });
+}
+
 export async function countOpenAlerts(accountId: string): Promise<number> {
   const ws = await requireWorkspace(accountId);
   return ws.alerts.filter((a) => a.status === "new").length;
@@ -449,7 +520,7 @@ export async function listPrices(productId: string, accountId?: string): Promise
 
 async function scanOwner(pred: (ws: Workspace) => boolean): Promise<string | null> {
   for (const id of await listAccountIds()) {
-    const { ws } = await loadWorkspace(id);
+    const ws = await loadWorkspace(id);
     if (ws && pred(ws)) return id;
   }
   return null;

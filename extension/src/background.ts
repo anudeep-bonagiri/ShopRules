@@ -114,6 +114,13 @@ async function handle(message: BgRequest): Promise<unknown> {
       return api("/api/health", {}, false);
     case "check":
       return api(`/api/products/${encodeURIComponent(message.id)}/check`, post({ force: message.force ?? true }));
+    case "account":
+      return api("/api/account");
+    case "alertStatus":
+      return api(`/api/alerts/${encodeURIComponent(message.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: message.status, ...(message.reason ? { reason: message.reason } : {}) }),
+      });
     case "settings":
       return getSettings();
     case "open-popup":

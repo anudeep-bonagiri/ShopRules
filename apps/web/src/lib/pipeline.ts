@@ -2,16 +2,13 @@ import { createHash } from "node:crypto";
 import { ApiError } from "./account";
 import {
   alertExistsForRuleHash,
-  insertAlert,
-  insertPrice,
-  insertProduct,
-  insertRules,
+  applyCheckBatch,
+  insertProductBundle,
   insertRun,
   insertSkill,
   listRules,
   listSkills,
-  touchProduct,
-  updateRule,
+  newId,
   findProductByUrl,
   type AccountRow,
   type AlertRow,
@@ -88,13 +85,26 @@ async function recordRun(account: AccountRow, productId: string | null, kind: st
   }
 }
 
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
 // 1. Ingest a listing: Tavily Extract reads the page, Nemotron Nano classifies it,
 //    the catalog seeds the watch rules.
 
 export async function ingestProduct(account: AccountRow, rawUrl: string, page?: PageFields): Promise<{ product: ProductRow; rules: RuleRow[]; meter: Meter; existing: boolean }> {
   const url = normalizeListingUrl(rawUrl);
   const existing = await findProductByUrl(account.id, url);
-  if (existing) return { product: existing, rules: await listRules(existing.id), meter: newMeter(), existing: true };
+  if (existing) return { product: existing, rules: await listRules(existing.id, account.id), meter: newMeter(), existing: true };
 
   const meter = newMeter();
   const marketplace = marketplaceFromUrl(url);
@@ -139,7 +149,7 @@ export async function ingestProduct(account: AccountRow, rawUrl: string, page?: 
         "summary: two plain sentences describing the product for a regulator.",
         "Return JSON only.",
       ].join(" "),
-      user: `Marketplace: ${marketplace}\nURL: ${url}\n\nListing text:\n${combined.slice(0, 14000)}`,
+      user: `Marketplace: ${marketplace}\nURL: ${url}\n\nListing text:\n${combined.slice(0, 12000)}`,
       maxTokens: 1200,
     },
     meter,
@@ -149,24 +159,25 @@ export async function ingestProduct(account: AccountRow, rawUrl: string, page?: 
   const currency = profile.currency ?? page?.currency ?? (price != null ? "USD" : null);
   const imageUrl = page?.image ?? firstImage(extracted);
 
-  const product = await insertProduct({
-    account_id: account.id,
-    url,
-    marketplace,
-    title: (page?.title || profile.title || "Untitled listing").slice(0, 200),
-    price,
-    currency,
-    image_url: imageUrl,
-    profile,
-    extracted_text: combined.slice(0, 20000),
-  });
-  if (price != null) await insertPrice({ account_id: account.id, product_id: product.id, price, currency, source: page ? "extension" : "listing" });
-
   const states = account.settings?.ship_to_states?.length ? account.settings.ship_to_states : ["TX", "CA", "NY", "FL"];
   const specs: RuleSpec[] = buildRules(profile, marketplace, states);
-  const rules = await insertRules(account.id, product.id, specs);
-  await recordRun(account, product.id, "ingest", meter);
-  return { product, rules, meter, existing: false };
+  const bundle = await insertProductBundle(
+    {
+      account_id: account.id,
+      url,
+      marketplace,
+      title: (page?.title || profile.title || "Untitled listing").slice(0, 200),
+      price,
+      currency,
+      image_url: imageUrl,
+      profile,
+      extracted_text: combined.slice(0, 20000),
+    },
+    price != null ? { price, currency, source: page ? "extension" : "listing" } : null,
+    specs,
+  );
+  await recordRun(account, bundle.product.id, "ingest", meter);
+  return { product: bundle.product, rules: bundle.rules, meter, existing: bundle.existing };
 }
 
 function firstImage(markdown: string): string | null {
@@ -176,7 +187,8 @@ function firstImage(markdown: string): string | null {
 
 // 2. Run the watch rules for a product. Tavily Search on official domains, Tavily
 //    Extract on the top pages, Nemotron Ultra decides and drafts, the verifier
-//    drops any claim it cannot find in the extracted text.
+//    drops any claim it cannot find in the extracted text. Rules run three at a
+//    time and all bookkeeping lands in one workspace write.
 
 export interface CheckResult {
   alerts: AlertRow[];
@@ -186,9 +198,15 @@ export interface CheckResult {
   errors: string[];
 }
 
+interface RuleOutcome {
+  status: "alert" | "unchanged" | "none";
+  patch: { last_run_at: string; last_hash?: string; last_headline?: string | null };
+  alert?: AlertRow;
+}
+
 export async function runChecks(account: AccountRow, product: ProductRow, opts: { force?: boolean; maxRules?: number } = {}): Promise<CheckResult> {
   const meter = newMeter();
-  const rules = await listRules(product.id);
+  const rules = await listRules(product.id, account.id);
   const now = Date.now();
   const due = rules.filter((r) => {
     if (opts.force) return true;
@@ -197,31 +215,40 @@ export async function runChecks(account: AccountRow, product: ProductRow, opts: 
   });
   // Never-run rules first, then the oldest; bound the work per request.
   due.sort((a, b) => (a.last_run_at ? new Date(a.last_run_at).getTime() : 0) - (b.last_run_at ? new Date(b.last_run_at).getTime() : 0));
-  const batch = due.slice(0, opts.maxRules ?? 6);
+  const batch = due.slice(0, opts.maxRules ?? 4);
   const skills = await listSkills(account.id, product.id);
 
-  const alerts: AlertRow[] = [];
   const errors: string[] = [];
-  let skipped = 0;
-
-  for (const rule of batch) {
+  const outcomes = await mapLimit(batch, 3, async (rule) => {
     try {
-      const outcome = await checkRule(account, product, rule, skills, meter, Boolean(opts.force));
-      if (outcome === "unchanged") skipped += 1;
-      else if (outcome) alerts.push(outcome);
+      return { rule, outcome: await checkRule(account, product, rule, skills, meter, Boolean(opts.force)) };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       errors.push(`${rule.title}: ${msg}`);
       console.error("[shop-rules] rule failed", rule.key, msg);
+      return { rule, outcome: null };
     }
+  });
+
+  const stamp = new Date().toISOString();
+  const alerts: AlertRow[] = [];
+  const rulePatches: Array<{ id: string; patch: RuleOutcome["patch"] }> = [];
+  let skipped = 0;
+  for (const { rule, outcome } of outcomes) {
+    if (!outcome) continue;
+    rulePatches.push({ id: rule.id, patch: outcome.patch });
+    if (outcome.status === "unchanged") skipped += 1;
+    if (outcome.alert) alerts.push(outcome.alert);
   }
 
-  await touchProduct(product.id, { last_checked_at: new Date().toISOString() });
+  const saved = await applyCheckBatch(account.id, { productId: product.id, lastCheckedAt: stamp, rulePatches, alerts });
+  for (const a of saved) await notifyTelegram(account, product, a);
   await recordRun(account, product.id, "check", meter);
-  return { alerts, checked: batch.length, skipped_unchanged: skipped, meter, errors };
+  return { alerts: saved, checked: batch.length, skipped_unchanged: skipped, meter, errors };
 }
 
-async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow, skills: SkillRow[], meter: Meter, force: boolean): Promise<AlertRow | "unchanged" | null> {
+async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow, skills: SkillRow[], meter: Meter, force: boolean): Promise<RuleOutcome> {
+  const ranAt = new Date().toISOString();
   const search = await tavilySearch(
     {
       query: rule.query,
@@ -237,10 +264,7 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
   );
 
   const results: TavilyResult[] = (search.results ?? []).filter((r) => r.url && r.content).sort((a, b) => b.score - a.score).slice(0, 4);
-  if (results.length === 0) {
-    await updateRule(rule.id, { last_run_at: new Date().toISOString() });
-    return null;
-  }
+  if (results.length === 0) return { status: "none", patch: { last_run_at: ranAt } };
 
   // Fuller text for the verifier: extract the top pages with the rule as the query.
   const sources: SourceText[] = [];
@@ -267,14 +291,8 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
     .update(sources.map((s) => `${s.url}|${s.text.slice(0, 400)}`).sort().join("\n"))
     .digest("hex")
     .slice(0, 24);
-  if (!force && rule.last_hash === hash) {
-    await updateRule(rule.id, { last_run_at: new Date().toISOString() });
-    return "unchanged";
-  }
-  if (await alertExistsForRuleHash(rule.id, hash)) {
-    await updateRule(rule.id, { last_run_at: new Date().toISOString(), last_hash: hash });
-    return "unchanged";
-  }
+  if (!force && rule.last_hash === hash) return { status: "unchanged", patch: { last_run_at: ranAt } };
+  if (await alertExistsForRuleHash(rule.id, hash, account.id)) return { status: "unchanged", patch: { last_run_at: ranAt, last_hash: hash } };
 
   const settings = account.settings ?? {};
   const unitCostPct = settings.unit_cost_pct ?? 45;
@@ -319,11 +337,16 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
 
   const verified = verifyClaims(check.claims, sources);
   const headline = check.headline.slice(0, 240);
-  await updateRule(rule.id, { last_run_at: new Date().toISOString(), last_hash: hash, last_headline: check.relevance === "no_change" ? rule.last_headline : headline });
+  const patch: RuleOutcome["patch"] = {
+    last_run_at: ranAt,
+    last_hash: hash,
+    last_headline: check.relevance === "no_change" ? rule.last_headline : headline,
+  };
 
-  if (check.relevance === "no_change" || verified.backed === 0) return null;
+  if (check.relevance === "no_change" || verified.backed === 0) return { status: "none", patch };
 
-  const alert = await insertAlert({
+  const alert: AlertRow = {
+    id: newId(),
     account_id: account.id,
     product_id: product.id,
     rule_id: rule.id,
@@ -340,9 +363,9 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
     action: check.action,
     sources: sourceMeta.map(({ url, title, domain }) => ({ url, title, domain })),
     dismiss_reason: null,
-  });
-  await notifyTelegram(account, product, alert);
-  return alert;
+    created_at: ranAt,
+  };
+  return { status: "alert", patch, alert };
 }
 
 // 3. Competitor prices for the extension's Compare card.
