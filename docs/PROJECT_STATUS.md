@@ -74,6 +74,29 @@ Automated pass (`check_submission.py`, facts header 2026-10-30T04:42:00Z), obser
 Observed on the public demo with `BASE=https://shop-rules.vercel.app scripts/rehearse.sh`: health ok; fresh workspace; Load demo shop 37 s, 3 products; the toy 3 open alerts (de minimis 5/5 backed, two Section 301 alerts 3/3 backed); Run check now 14 s, 4 rules; forge 10 s, status unrun (no sandbox project id), 4 steps; receipt 6 runs; workspace deleted; 64 s in all.
 Verifier fixture: 8 of 10 planted misquotes rejected (let through: negated_long, stitched_same_source), 6 of 6 decoys accepted; both gaps are in `docs/not-built.md`.
 
+## 2026-10-30 (UTC): Sudeep's branch merged, verify rerun
+
+Merged `sudeep-updates` (21 commits: deterministic pricing, curated HTS catalog, guardrails with a golden-case eval, price tracking and price-change alerts, nexus verification with Tavily Map and Crawl, source trail and Tavily receipt, scoped checks with live progress, seller overrides, CSV sales import, token rotation, rate caps, extension HUD with one-click connect, offline demo mode with canned answers, 81 unit tests). Conflicts resolved by hand in nine files: the store module keeps Postgres as the default with his compare-and-swap semantics on both backends and his file-backed demo store; his decisions D-11 to D-15 stand, last night's became D-16 to D-18. Observed: `npm run typecheck` clean on both packages; `npm test` 81 pass, 0 fail; facts regenerated at 2026-10-30T05:22:34Z (2 alerts from 4 rules after the guardrails folded repeats, 9 of 9 claims backed, 3 of 3 .gov domains, forge 38 lines and 4 tests, verifier fixture 8 of 10 and 6 of 6).
+
+Automated pass (`check_submission.py`), observed output:
+
+- PASS allow: every entry carries a reason
+- PASS numbers: DEVPOST_FULL.md: 32 numbers, 6 allowed with a reason, 0 untraced, short counts to eyeball: ['40', '65', '46', '29']; README.md: 18 numbers, 3 allowed with a reason, 0 untraced, short counts to eyeball: ['46']; VIDEO.md: 6 numbers, 1 allowed with a reason, 0 untraced, short counts to eyeball: ['65']; RUNBOOK.md: 12 numbers, 3 allowed with a reason, 0 untraced, short counts to eyeball: ['65']
+- PASS live-claims: skipped: the facts files carry none of the three sentences this check reads (see FACTS_CONTRACT.md)
+- PASS facts-fresh: facts headers {'FACTS.md': '2026-10-30T05:22:34Z', 'RESULTS.md': '2026-10-30T05:22:34Z'}; every quoted timestamp matches
+- PASS dashes: none
+- PASS placeholders: none
+- PASS live-wording: 37 line(s); read each against the label on the card it describes: ['DEVPOST_FULL.md:32', 'DEVPOST_FULL.md:66', 'DEVPOST_FULL.md:67', 'DEVPOST_FULL.md:79', 'DEVPOST_FULL.md:108', 'README.md:3', 'README.md:7', 'README.md:18', 'README.md:73', 'README.md:125', 'README.md:129', 'README.md:137']
+- PASS autonomous-wording: 2 line(s); a refusal count or the word refuses must sit in the same paragraph: ['VIDEO.md:17', 'VIDEO.md:17']
+- PASS links: 4 link(s) answered
+- PASS tracks: one Sponsor line equal to the allowed list; do-not-select list present and disjoint
+- PASS identifiers: 10 backticked identifier(s) on the page, all found in .
+- PASS readme: all sections present once; every backticked path exists
+- PASS repo: PUBLIC https://github.com/anudeep-bonagiri/ShopRules
+- PASS secrets: clean
+
+Rehearsal on the public demo after the merge: the first run left the toy with no alerts because the seed checked only two tariff rules per product and the de minimis rule is the third; the seed now runs all four tariff rules on the toy. Second run, observed: Load demo shop about 55 s; the toy's alerts include the de minimis alert at 4 of 4 backed; Run check now 8 rules, 7 new alerts, 15 s; forge unrun (no sandbox project id), 13 s; receipt 8 runs; workspace deleted; 85 s in all. Production health: `store: postgres`, `tavily_mode: keyed`.
+
 ## Tried and rejected
 
 | Tried | Why rejected | Replaced by |
