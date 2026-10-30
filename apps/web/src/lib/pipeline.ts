@@ -459,6 +459,25 @@ export async function runChecks(account: AccountRow, product: ProductRow, opts: 
     if (outcome.status === "unchanged") skipped += 1;
     if (outcome.alert) alerts.push(outcome.alert);
   }
+  // Rules run three at a time, so two rules on the same product can surface the
+  // same notice before either alert is written. Keep the first of any pair with
+  // the same headline, or the same family, rate, and date.
+  const seenKeys = new Set<string>();
+  const kept: AlertRow[] = [];
+  for (const a of alerts) {
+    const headlineKey = `h:${a.headline.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim()}`;
+    const factKey = a.impact.tariff_rate_change_pct != null || a.impact.effective_date ? `f:${a.family}:${a.impact.tariff_rate_change_pct}:${a.impact.effective_date}:${a.impact.estimated_cost_change_pct}` : null;
+    if (seenKeys.has(headlineKey) || (factKey && seenKeys.has(factKey))) {
+      const patch = rulePatches.find((p) => p.id === a.rule_id);
+      if (patch) patch.patch.last_headline = `${a.headline} (same finding as another rule on this product)`;
+      continue;
+    }
+    seenKeys.add(headlineKey);
+    if (factKey) seenKeys.add(factKey);
+    kept.push(a);
+  }
+  alerts.length = 0;
+  alerts.push(...kept);
 
   let saved: AlertRow[] = [];
   try {

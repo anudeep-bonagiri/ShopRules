@@ -177,9 +177,6 @@ export default function RulesPage() {
                         {r.paused ? <StatusPill tone="warning">Paused</StatusPill> : r.last_run_at ? <StatusPill tone="success">Checked</StatusPill> : <StatusPill>Queued</StatusPill>}
                       </div>
                     </div>
-                    <NextLink href={`/products/${r.product_id}`} className="sr-link" style={{ fontSize: 12, display: "block" }}>
-                      {r.product_title || "Product"}
-                    </NextLink>
                     <p className="sr-xs sr-num">
                       {r.include_domains.join(", ")}. Last run {timeAgo(r.last_run_at)}.
                     </p>

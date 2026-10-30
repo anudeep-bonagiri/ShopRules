@@ -839,8 +839,8 @@ export async function deleteForge(accountId: string, id: string): Promise<void> 
 
 // Price history
 
-export async function insertPrice(row: { account_id: string; product_id: string; price: number; currency: string | null; source: string }): Promise<void> {
-  const price: PriceRow = { id: uid(), product_id: row.product_id, price: row.price, currency: row.currency, source: row.source, at: now() };
+export async function insertPrice(row: { account_id: string; product_id: string; price: number; currency: string | null; source: string; at?: string }): Promise<void> {
+  const price: PriceRow = { id: uid(), product_id: row.product_id, price: row.price, currency: row.currency, source: row.source, at: row.at ?? now() };
   await mutate(row.account_id, (ws) => {
     ws.prices.push(price);
   });

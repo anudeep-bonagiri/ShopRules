@@ -1,6 +1,8 @@
 import { ApiError, currentAccount, fail, json } from "@/lib/account";
 import { consumeQuota, findProductByUrl } from "@/lib/db";
 import { ingestProduct, normalizeListingUrl, runChecks, type PageFields } from "@/lib/pipeline";
+import { offlineMode } from "@/lib/offline";
+import { insertPrice } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -67,6 +69,17 @@ export async function POST() {
         const r = await ingestProduct(account, item.url, item.page);
         products.push(r.product);
         fresh += 1;
+        // Demo mode only: eight weeks of labelled "demo" price points so the
+        // chart, sparklines, and change-since-added have something to show.
+        // Live workspaces get history from the listing, the extension, and the daily refresh.
+        if (offlineMode().models === "canned" && typeof item.page.price === "number") {
+          const base = item.page.price;
+          const wobble = [0.94, 0.96, 0.97, 0.97, 1.02, 1.0, 0.99, 1.0];
+          for (let w = 0; w < wobble.length; w++) {
+            const at = new Date(Date.now() - (wobble.length - w) * 7 * 86400000).toISOString();
+            await insertPrice({ account_id: account.id, product_id: r.product.id, price: Math.round(base * wobble[w] * 100) / 100, currency: item.page.currency ?? "USD", source: "demo", at });
+          }
+        }
       } catch (err) {
         if (err instanceof ApiError && err.status === 429) throw err;
         errors.push(err instanceof Error ? err.message : String(err));
