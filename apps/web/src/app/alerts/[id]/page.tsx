@@ -9,6 +9,7 @@ import type { AccountRow, AlertRow, ProductRow, RuleRow, SkillRow } from "@/lib/
 import { fmtMoney, fmtPct } from "@/lib/economics";
 import { FAMILY_LABEL } from "@/lib/rules-catalog";
 import { EvidenceBar } from "@/components/ui";
+import { SourceTrailCard } from "@/components/SourceTrail";
 import { AccentCard, alertEconomics, alertTone, BackLink, DutyImpact, effectiveLabel, fmtDate, hostOf, KV, marketplaceLabel, ProductThumb, RepriceBlock, Skeleton, sourceDomain, SrButton, SrCard, StatusPill } from "@/components/stitch";
 
 type Detail = { alert: AlertRow; product: ProductRow | null; rule: RuleRow | null; sources: AlertRow["sources"] };
@@ -265,23 +266,7 @@ export default function AlertPage() {
           </SrCard>
 
           <SrCard className="sr-stack" style={{ order: 5 }}>
-            <h2 className="sr-h2">Sources read</h2>
-            {alert.sources.length === 0 ? (
-              <p className="sr-sm">No sources recorded.</p>
-            ) : (
-              <div className="sr-rows">
-                {alert.sources.map((s) => (
-                  <div key={s.url} className="sr-stack" style={{ padding: "8px 0", gap: 2 }}>
-                    <span className="sr-xs" style={{ fontWeight: 600, color: "var(--sr-text)" }}>
-                      {s.domain}
-                    </span>
-                    <a href={s.url} target="_blank" rel="noopener noreferrer" className="sr-link" style={{ fontSize: 12, display: "block", wordBreak: "break-word" }}>
-                      {s.title || s.url}
-                    </a>
-                  </div>
-                ))}
-              </div>
-            )}
+            <SourceTrailCard trail={alert.trail} sources={alert.sources} />
           </SrCard>
 
           {product ? (

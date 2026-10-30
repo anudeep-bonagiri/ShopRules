@@ -28,6 +28,8 @@ import { buildRules, countryName, marketplaceFromUrl, type RuleSpec } from "./ru
 import { pricingInputs, reprice } from "./pricing";
 import { auditRuleCheck, historyContext } from "./sanity";
 import { effectiveProfile, effectivePrice, pricingProduct } from "./product";
+import { addExtract, addSearch, matchPassages, newTrail, setHash, setModel } from "./source-trail";
+import { fetchHtsRate } from "./hts-rate";
 import { guardNexusParse } from "./nexus";
 import { catalogMenu, finalizeHts } from "./hts-catalog";
 import {
@@ -284,6 +286,15 @@ async function ingestProductInner(
   const imageUrl = page?.image ?? firstImage(extracted);
 
   await progress.step("seed", `${hts.candidates[0]?.code ? `HS ${hts.candidates[0].code}` : "classified"}`);
+  // General duty rate for the heading, read from hts.usitc.gov with Tavily Extract. No model.
+  let dutyRate: ProductRow["duty_rate"] = null;
+  if (hts.candidates[0]?.code) {
+    try {
+      dutyRate = await fetchHtsRate(hts.candidates[0].code, meter, { detail: profile.hts_detail ?? null });
+    } catch (err) {
+      console.error("[shop-rules] hts rate read failed", err instanceof Error ? err.message : err);
+    }
+  }
   const states = account.settings?.ship_to_states?.length ? account.settings.ship_to_states : ["TX", "CA", "NY", "FL"];
   const specs: RuleSpec[] = buildRules(profile, marketplace, states);
   const bundle = await insertProductBundle(
@@ -296,6 +307,7 @@ async function ingestProductInner(
       currency,
       image_url: imageUrl,
       profile,
+      duty_rate: dutyRate,
       extracted_text: combined.slice(0, 20000),
     },
     price != null ? { price, currency, source: page ? "extension" : "listing" } : null,
@@ -505,6 +517,8 @@ export function buildRuleCheckPrompt(i: RuleCheckPromptInput): { system: string;
 
 async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow, skills: SkillRow[], meter: Meter, force: boolean): Promise<RuleOutcome> {
   const ranAt = new Date().toISOString();
+  // The trail records every Tavily call and matched passage behind the verdict.
+  const trail = newTrail(rule, "year");
   const search = await tavilySearch(
     {
       query: rule.query,
@@ -520,6 +534,7 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
   );
 
   const results: TavilyResult[] = (search.results ?? []).filter((r) => r.url && r.content).sort((a, b) => b.score - a.score).slice(0, 4);
+  addSearch(trail, search.results ?? [], results.map((r) => r.url));
   if (results.length === 0) return { status: "none", patch: { last_run_at: ranAt } };
 
   // Fuller text for the verifier: extract the top pages with the rule as the query.
@@ -531,12 +546,14 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
       { query: rule.query, chunks_per_source: 3, extract_depth: "basic" },
       meter,
     );
+    addExtract(trail, results.map((r) => r.url), ex);
     for (const r of results) {
       const full = ex.results.find((e) => e.url === r.url)?.raw_content;
       sources.push({ url: r.url, text: `${r.content}\n${full ?? ""}` });
       sourceMeta.push({ url: r.url, title: r.title, domain: domainOf(r.url), published_date: r.published_date });
     }
   } catch {
+    addExtract(trail, results.map((r) => r.url), null);
     for (const r of results) {
       sources.push({ url: r.url, text: r.content });
       sourceMeta.push({ url: r.url, title: r.title, domain: domainOf(r.url), published_date: r.published_date });
@@ -547,6 +564,7 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
     .update(sources.map((s) => `${s.url}|${s.text.slice(0, 400)}`).sort().join("\n"))
     .digest("hex")
     .slice(0, 24);
+  setHash(trail, hash);
   if (!force && rule.last_hash === hash) return { status: "unchanged", patch: { last_run_at: ranAt } };
   if (await alertExistsForRuleHash(rule.id, hash, account.id)) return { status: "unchanged", patch: { last_run_at: ranAt, last_hash: hash } };
 
@@ -576,6 +594,8 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
     { name: "rule_check", purpose: `rule check ${rule.key}`, schema: RuleCheckSchema, maxTokens: 1600, temperature: 0.1, system: prompt.system, user: prompt.user },
     meter,
   );
+
+  setModel(trail, meter.llm.at(-1) ?? null);
 
   // "Effective today" is the model filling a blank, not a date it read.
   if (raw.impact.effective_date === today) raw.impact.effective_date = null;
@@ -631,6 +651,7 @@ async function checkRule(account: AccountRow, product: ProductRow, rule: RuleRow
     action: { ...check.action, suggested_price: pricing?.suggested_price ?? null },
     pricing,
     guardrails: audit.issues,
+    trail: matchPassages(trail, verified.claims, sources),
     sources: sourceMeta.map(({ url, title, domain }) => ({ url, title, domain })),
     dismiss_reason: null,
     created_at: ranAt,

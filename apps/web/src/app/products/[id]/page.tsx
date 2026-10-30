@@ -319,6 +319,13 @@ export default function ProductInspectorPage() {
                     {profile?.hts_guarded ? ". Heading set from the catalog, the classifier disagreed" : ""}
                   </p>
                 ) : null}
+                {product.duty_rate ? (
+                  <p className="sr-xs sr-num">
+                    {product.duty_rate.verified && product.duty_rate.general
+                      ? `General duty ${product.duty_rate.general}${product.duty_rate.special ? `, special ${product.duty_rate.special}` : ""}, ${product.duty_rate.label}`
+                      : `Official duty rate not read yet (${product.duty_rate.reason ?? "schedule page not parsed"}), ${product.duty_rate.label}`}
+                  </p>
+                ) : null}
               </div>
             </div>
             <div className="sr-inset sr-pricegrid">

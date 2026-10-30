@@ -1,6 +1,8 @@
 import { ApiError, currentAccount, fail, json, readJson } from "@/lib/account";
-import { deleteProduct, getProduct, listAlerts, listPrices, listRules, listSkills, updateProductOverrides } from "@/lib/db";
+import { deleteProduct, getProduct, listAlerts, listPrices, listRules, listSkills, setProductDutyRate, updateProductOverrides } from "@/lib/db";
 import { sanitizeOverrides } from "@/lib/product";
+import { fetchHtsRate } from "@/lib/hts-rate";
+import { newMeter } from "@/lib/schemas";
 import { reseedProductRules } from "@/lib/pipeline";
 
 export const dynamic = "force-dynamic";
@@ -35,6 +37,19 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     if (errors.length) throw new ApiError(400, errors.join("; "));
     if (Object.keys(patch).length === 0) throw new ApiError(400, "Nothing to update");
     const updated = await updateProductOverrides(account.id, product.id, patch);
+    // A new heading means a new official duty rate; read it from hts.usitc.gov (Tavily Extract, no model).
+    if ("hts_heading" in patch || "hts_detail" in patch) {
+      const heading = updated.overrides?.hts_heading ?? updated.profile.hts_candidates[0]?.code ?? null;
+      if (heading) {
+        try {
+          const rate = await fetchHtsRate(heading, newMeter(), { detail: updated.overrides?.hts_detail ?? updated.profile.hts_detail ?? null });
+          await setProductDutyRate(account.id, product.id, rate);
+          updated.duty_rate = rate;
+        } catch (err) {
+          console.error("[shop-rules] duty rate refresh failed", err instanceof Error ? err.message : err);
+        }
+      }
+    }
     // Origin, heading, materials, and the for-children flag decide which rules apply.
     const reseedKeys = ["origin_country", "hts_heading", "for_children", "materials"];
     let reseed: { added: number; removed: number; kept: number } | null = null;

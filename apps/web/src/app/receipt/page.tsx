@@ -3,6 +3,7 @@
 import { DataTable } from "@shopify/polaris";
 import { timeAgo, useApi } from "@/lib/client";
 import type { RunRow } from "@/lib/db";
+import { FAMILIES, receiptLines, type TavilyReceipt } from "@/lib/tavily-receipt";
 import { EmptyCard, MetricCard, PageError, Skeleton, SrCard, StatusPill } from "@/components/stitch";
 
 type Receipt = {
@@ -11,6 +12,7 @@ type Receipt = {
   by_tier: Record<string, { calls: number; prompt_tokens: number; completion_tokens: number; cost_usd: number; ms: number }>;
   models: Record<string, string>;
   prices_per_million: Record<string, { in: number; out: number }>;
+  tavily?: TavilyReceipt;
 };
 
 const TIERS = ["nano", "super", "ultra"] as const;
@@ -46,6 +48,39 @@ export default function ReceiptPage() {
         <MetricCard label="Saved by routing" value={t ? `${t.saved_pct.toFixed(0)}%` : "..."} tone={t && t.saved_usd > 0 ? "success" : "neutral"} delta={t ? `$${t.saved_usd.toFixed(4)}` : undefined} />
         <MetricCard label="Source reads" value={t ? String(t.tavily_calls) : "..."} delta={t ? `${t.tavily_credits} credits (est.)` : undefined} />
       </div>
+
+      <SrCard className="sr-stack">
+        <div className="sr-row sr-row--between">
+          <h2 className="sr-h2">Tavily, the source layer</h2>
+          {data?.tavily ? (
+            <StatusPill tone="success" caps={false}>
+              {Math.round(data.tavily.runs_without_model_ratio * 100)}% of runs needed no model
+            </StatusPill>
+          ) : null}
+        </div>
+        <p className="sr-xs">Search finds the official pages (restricted to each rule&apos;s domains), Extract reads them for the verifier and the daily price refresh, Map and Crawl walk the state revenue sites for nexus thresholds. The model only sees what Tavily read.</p>
+        {data?.tavily ? (
+          <>
+            <div className="sr-stack sr-stack--tight">
+              {receiptLines(data.tavily).map((line, i) => (
+                <p key={i} className="sr-sm sr-num">
+                  {line}
+                </p>
+              ))}
+            </div>
+            <DataTable
+              columnContentTypes={["text", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric", "numeric"]}
+              headings={["Family", "Search", "Extract", "Map", "Crawl", "Credits", "Alerts", "No model"]}
+              rows={FAMILIES.map((f) => {
+                const r = data.tavily!.by_family[f];
+                return [f, r.search, r.extract, r.map, r.crawl, r.credits, r.alerts, r.tavily_only_alerts];
+              })}
+            />
+          </>
+        ) : (
+          <Skeleton lines={2} card={false} />
+        )}
+      </SrCard>
 
       <SrCard className="sr-stack">
         <h2 className="sr-h2">By model</h2>

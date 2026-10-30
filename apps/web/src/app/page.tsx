@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { api, timeAgo, useApi } from "@/lib/client";
 import type { AccountRow, AlertRow, ForgeRow, ProductRow, RuleRow } from "@/lib/db";
 import { nexusProgress, nexusSeed } from "@/lib/nexus";
+import type { NexusVerification } from "@/lib/nexus-crawl";
 import {
   alertEconomics,
   Chip,
@@ -40,6 +41,22 @@ const FAMILY_CHIP: Record<Family, string> = { all: "All alerts", tariff: "Tariff
 export default function WatchlistPage() {
   const [busy, setBusy] = useState<"add" | "demo" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [verifyingNexus, setVerifyingNexus] = useState(false);
+
+  async function verifyNexus() {
+    setVerifyingNexus(true);
+    setError(null);
+    try {
+      const r = await api<{ verifications: NexusVerification[]; errors: string[] }>("/api/nexus/verify", { method: "POST", json: {} });
+      const ok = r.verifications.filter((v) => v.verified).length;
+      setNotice(`Read ${r.verifications.length} state revenue site${r.verifications.length === 1 ? "" : "s"} with Tavily; ${ok} threshold${ok === 1 ? "" : "s"} verified from the page text.${r.errors.length ? ` ${r.errors.join("; ")}` : ""}`);
+      nexusApi.refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setVerifyingNexus(false);
+    }
+  }
   const [notice, setNotice] = useState<string | null>(null);
   const [family, setFamily] = useState<Family>("all");
   const [allPulse, setAllPulse] = useState(false);
@@ -50,6 +67,7 @@ export default function WatchlistPage() {
   const account = useApi<{ account: AccountRow }>("/api/account");
   const health = useApi<Health>("/api/health");
   const forges = useApi<{ forges: ForgeRow[] }>("/api/forges");
+  const nexusApi = useApi<{ verifications: Record<string, NexusVerification> }>("/api/nexus");
   const forgeCount = forges.data?.forges.length ?? 0;
   const forgePassing = forges.data?.forges.filter((f) => f.status === "passed").length ?? 0;
 
@@ -114,14 +132,25 @@ export default function WatchlistPage() {
     const verifiedAlert = allAlerts
       .filter((a) => a.family === "tax" && ruleIds.has(a.rule_id) && a.impact?.nexus_verified && a.impact.nexus && (a.impact.nexus.dollars != null || a.impact.nexus.transactions != null))
       .sort((a, b) => b.created_at.localeCompare(a.created_at))[0] ?? null;
-    const threshold = verifiedAlert?.impact.nexus ?? (seed ? { dollars: seed.dollars, transactions: seed.transactions, operator: seed.operator } : { dollars: null, transactions: null, operator: null });
+    // Best source first: a threshold Tavily read on the revenue site itself, then a verifier-backed alert, then the seed.
+    const crawl = nexusApi.data?.verifications[code];
+    const crawled = crawl?.verified && crawl.parsed ? crawl : null;
+    const threshold = crawled?.parsed
+      ? { dollars: crawled.parsed.dollars, transactions: crawled.parsed.transactions, operator: crawled.parsed.operator }
+      : (verifiedAlert?.impact.nexus ?? (seed ? { dollars: seed.dollars, transactions: seed.transactions, operator: seed.operator } : { dollars: null, transactions: null, operator: null }));
     const yearRow = settings?.state_sales_by_year?.[thisYear]?.[code];
     const typed = settings?.state_sales?.[code];
     const sales = yearRow?.dollars ?? (typeof typed === "number" && Number.isFinite(typed) ? typed : null);
     const transactions = yearRow?.orders ?? null;
     const progress = nexusProgress({ threshold, sales, transactions });
-    const verified = verifiedAlert ? `verified ${fmtDate(verifiedAlert.created_at) ?? ""} from ${sourceDomain(verifiedAlert) ?? seed?.dor_domain ?? "the revenue site"}` : "seed value, last verified never";
-    return { code, name: seed?.name ?? code, rule, seed, threshold, sales, transactions, progress, verified, alertId: verifiedAlert?.id ?? null };
+    const verified = crawled
+      ? `verified ${fmtDate(crawled.checked_at) ?? ""} on ${crawled.sources[0]?.url ? new URL(crawled.sources[0].url).hostname.replace(/^www\./, "") : seed?.dor_domain ?? "the revenue site"} (Tavily ${crawled.method})${crawled.matches_seed ? "" : ", differs from the seed"}`
+      : verifiedAlert
+        ? `verified ${fmtDate(verifiedAlert.created_at) ?? ""} from ${sourceDomain(verifiedAlert) ?? seed?.dor_domain ?? "the revenue site"}`
+        : crawl && !crawl.verified
+          ? `seed value, revenue site checked ${fmtDate(crawl.checked_at) ?? ""} but no threshold parsed`
+          : "seed value, last verified never";
+    return { code, name: seed?.name ?? code, rule, seed, threshold, sales, transactions, progress, verified, alertId: verifiedAlert?.id ?? null, sourceUrl: crawled?.sources[0]?.url ?? null };
   });
 
   // Regulatory pulse: the official domains being watched, grouped.
@@ -272,7 +301,19 @@ export default function WatchlistPage() {
       </section>
 
       <section className="sr-stack">
-        <SectionHead title="Nexus limits" aside={settings?.sales_import ? `Sales from your ${settings.sales_import.source === "shopify" ? "Shopify" : "Etsy"} orders export` : "Sales tax thresholds by state"} />
+        <SectionHead
+          title="Nexus limits"
+          aside={
+            <span className="sr-row" style={{ gap: 10 }}>
+              <span>{settings?.sales_import ? `Sales from your ${settings.sales_import.source === "shopify" ? "Shopify" : "Etsy"} orders export` : "Sales tax thresholds by state"}</span>
+              {shipTo.length ? (
+                <SrButton onClick={() => void verifyNexus()} loading={verifyingNexus} disabled={!account.data}>
+                  Verify on the revenue sites
+                </SrButton>
+              ) : null}
+            </span>
+          }
+        />
         {!account.data ? (
           <Skeleton lines={2} />
         ) : shipTo.length === 0 ? (
@@ -341,11 +382,22 @@ export default function WatchlistPage() {
             <div className="sr-row sr-row--wrap sr-xs" style={{ gap: "4px 12px" }}>
               {nexus.map((n) => (
                 <span key={n.code} className="sr-num">
-                  {n.code}: {n.alertId ? <NextLink href={`/alerts/${n.alertId}`} className="sr-link">{n.verified}</NextLink> : n.verified}
+                  {n.code}:{" "}
+                  {n.sourceUrl ? (
+                    <a href={n.sourceUrl} target="_blank" rel="noopener noreferrer" className="sr-link">
+                      {n.verified}
+                    </a>
+                  ) : n.alertId ? (
+                    <NextLink href={`/alerts/${n.alertId}`} className="sr-link">
+                      {n.verified}
+                    </NextLink>
+                  ) : (
+                    n.verified
+                  )}
                 </span>
               ))}
             </div>
-            <p className="sr-xs">Seed thresholds come from each state revenue site and are labelled seeds until a check quotes the page. Amazon and Etsy collect for you as marketplace facilitators; sales from your own store count toward your own registration.</p>
+            <p className="sr-xs">Seed thresholds are labelled seeds until Tavily reads the state revenue site (Map finds the remote-seller pages, Extract reads them, a parser pulls the dollar and transaction tests with the quote). Amazon and Etsy collect for you as marketplace facilitators; sales from your own store count toward your own registration.</p>
           </SrCard>
         )}
       </section>

@@ -5,6 +5,9 @@ import type { RuleSpec } from "./rules-catalog";
 import type { PricingResult } from "./pricing";
 import type { GuardrailIssue } from "./sanity";
 import type { ProductOverrides } from "./product";
+import type { SourceTrail } from "./source-trail";
+import type { HtsRateResult } from "./hts-rate";
+import type { NexusVerification } from "./nexus-crawl";
 import { decideQuota, limitFor, pruneUsage, usageKey, type LimitKind, type QuotaDecision } from "./limits";
 
 // Server-only data layer. Each workspace (account) is one private JSON document
@@ -53,6 +56,8 @@ export interface ProductRow {
   profile: ProductProfile;
   /** Seller-set fields; see product.ts. The classifier never writes here. */
   overrides?: ProductOverrides | null;
+  /** General duty rate read from hts.usitc.gov for the product's heading (hts-rate.ts). */
+  duty_rate?: HtsRateResult | null;
   /** Last competitor search, kept 24 h because it is a paid call. */
   compare_cache?: { at: string; result: CompetitorListings & { price_position: string } } | null;
   extracted_text: string | null;
@@ -106,6 +111,8 @@ export interface AlertRow {
   pricing?: PricingResult | null;
   /** What the deterministic guardrails changed on the model's verdict before this alert was raised (sanity.ts). */
   guardrails?: GuardrailIssue[];
+  /** Every Tavily call behind this alert and the passages the verifier matched (source-trail.ts). */
+  trail?: SourceTrail | null;
   sources: Array<{ url: string; title: string; domain: string }>;
   dismiss_reason: string | null;
   created_at: string;
@@ -194,6 +201,8 @@ interface Workspace {
   skills: SkillRow[];
   prices: PriceRow[];
   forges?: ForgeRow[];
+  /** Nexus thresholds verified on the state revenue sites with Tavily Map, Crawl, and Extract. */
+  nexus_verifications?: Record<string, NexusVerification>;
 }
 
 const ACCESS = { access: "private" as const };
@@ -491,6 +500,24 @@ export async function setCompareCache(accountId: string, id: string, result: Com
     const p = ws.products.find((x) => x.id === id);
     if (p) p.compare_cache = { at: now(), result };
   });
+}
+
+export async function setProductDutyRate(accountId: string, id: string, rate: HtsRateResult | null): Promise<void> {
+  await mutate(accountId, (ws) => {
+    const p = ws.products.find((x) => x.id === id);
+    if (p) p.duty_rate = rate;
+  });
+}
+
+export async function saveNexusVerification(accountId: string, v: NexusVerification): Promise<void> {
+  await mutate(accountId, (ws) => {
+    ws.nexus_verifications = { ...(ws.nexus_verifications ?? {}), [v.state]: v };
+  });
+}
+
+export async function listNexusVerifications(accountId: string): Promise<Record<string, NexusVerification>> {
+  const ws = await requireWorkspace(accountId);
+  return ws.nexus_verifications ?? {};
 }
 
 export async function deleteProduct(accountId: string, id: string): Promise<void> {

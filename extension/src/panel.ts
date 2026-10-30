@@ -553,7 +553,8 @@ function renderStats(s: PanelState): string {
   const hts = product?.profile?.hts_candidates?.[0];
   const pts = tariff?.impact?.tariff_rate_change_pct ?? null;
   const dutyValue = pts != null ? `${pts > 0 ? "+" : ""}${pts} pts` : hts?.code ? `HS ${hts.code}` : origin ? (COUNTRY[origin.toUpperCase()] ?? origin) : "Unknown";
-  const dutyDelta = pts != null ? `${esc(hts?.code ? `HS ${hts.code}, ` : "")}${esc(origin ? (COUNTRY[origin.toUpperCase()] ?? origin) : "origin unknown")} <span class="sr-red">open tariff alert</span>` : hts?.code ? `${esc(hts.description)}${origin ? `, from ${esc(COUNTRY[origin.toUpperCase()] ?? origin)}` : ", origin unknown"}` : s.detail ? "Set the origin in Shop Rules to sharpen tariff checks" : "Classified when you watch it";
+  const rate = product?.duty_rate?.verified && product.duty_rate.general ? `general duty ${product.duty_rate.general} (hts.usitc.gov)` : null;
+  const dutyDelta = pts != null ? `${esc(hts?.code ? `HS ${hts.code}, ` : "")}${esc(origin ? (COUNTRY[origin.toUpperCase()] ?? origin) : "origin unknown")} <span class="sr-red">open tariff alert</span>${rate ? `, ${esc(rate)}` : ""}` : hts?.code ? `${esc(hts.description)}${origin ? `, from ${esc(COUNTRY[origin.toUpperCase()] ?? origin)}` : ", origin unknown"}${rate ? `, ${esc(rate)}` : ""}` : s.detail ? "Set the origin in Shop Rules to sharpen tariff checks" : "Classified when you watch it";
   const dutyTile = tile("Duty exposure", dutyValue, dutyDelta, pts != null && pts > 0 ? "" : "");
 
   // 4. Weekly margin drag from the open tariff alert, at the seller's units per week.
