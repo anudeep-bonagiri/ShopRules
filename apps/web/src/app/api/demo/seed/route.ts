@@ -85,13 +85,15 @@ export async function POST() {
         errors.push(err instanceof Error ? err.message : String(err));
       }
     }
-    // First check: the two tariff rules of each new product (origin and, for
-    // China, Section 301), so the first screen shows a real verified alert.
+    // First check: every tariff rule of the toy (origin, Section 301, de minimis,
+    // the HTS rate), which is the alert a judge opens first, and the two leading
+    // tariff rules of the other listings, so the first screen shows real verified
+    // alerts inside the route's time budget.
     let alerts = 0;
     if (fresh > 0) {
-      for (const product of products) {
+      for (const [i, product] of products.entries()) {
         try {
-          const r = await runChecks(account, product, { scope: "tariff", maxRules: 2 });
+          const r = await runChecks(account, product, { scope: "tariff", maxRules: i === 0 ? 4 : 2 });
           alerts += r.alerts.length;
           errors.push(...r.errors);
         } catch (err) {

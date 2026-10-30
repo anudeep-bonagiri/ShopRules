@@ -1,5 +1,5 @@
 {
-  "asOf": "2026-10-30T04:42:00Z",
+  "asOf": "2026-10-30T05:22:34Z",
   "models": {
     "nano": "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B",
     "super": "nvidia/nemotron-3-super-120b-a12b",
@@ -30,11 +30,11 @@
     "price": 34
   },
   "ingest": {
-    "ms": 23603,
+    "ms": 24887,
     "origin_country": "CN",
     "hts_top": {
-      "code": "9503.00",
-      "description": "Toys, games and sports equipment; parts thereof; and accessories thereof, games and sports equipment; parts thereof; and accessories thereof, other toys, games and sports equipment",
+      "code": "9503",
+      "description": "Toys, scale models, puzzles",
       "confidence": 0.95
     },
     "intended_for_children": true,
@@ -45,111 +45,87 @@
       "tax": 4,
       "policy": 1
     },
-    "tavily_calls": 2,
+    "tavily_calls": 3,
     "llm": [
       {
         "tier": "nano",
-        "prompt_tokens": 314,
-        "completion_tokens": 486,
-        "ms": 2870
+        "prompt_tokens": 1650,
+        "completion_tokens": 350,
+        "ms": 2585
       }
     ]
   },
   "check": {
-    "ms": 13397,
+    "ms": 16250,
     "rules_checked": 4,
     "unchanged": 0,
-    "alerts": 4,
+    "alerts": 2,
     "errors": [],
-    "claims_proposed": 11,
-    "claims_backed": 10,
-    "claims_rejected": 1,
+    "claims_proposed": 9,
+    "claims_backed": 9,
+    "claims_rejected": 0,
     "source_domains": [
       "cbp.gov",
       "federalregister.gov",
-      "hts.usitc.gov",
-      "ustr.gov",
-      "whitehouse.gov"
+      "hts.usitc.gov"
     ],
     "official_domains": [
       "cbp.gov",
       "federalregister.gov",
-      "hts.usitc.gov",
-      "ustr.gov",
-      "whitehouse.gov"
+      "hts.usitc.gov"
     ],
     "tavily_calls": 8,
     "llm": [
       {
         "tier": "ultra",
-        "prompt_tokens": 4500,
-        "completion_tokens": 792,
-        "ms": 3639
+        "prompt_tokens": 4774,
+        "completion_tokens": 342,
+        "ms": 3311
       },
       {
         "tier": "ultra",
-        "prompt_tokens": 4308,
-        "completion_tokens": 1005,
-        "ms": 5088
+        "prompt_tokens": 4610,
+        "completion_tokens": 1043,
+        "ms": 4344
       },
       {
         "tier": "ultra",
-        "prompt_tokens": 3665,
-        "completion_tokens": 890,
-        "ms": 3909
+        "prompt_tokens": 4014,
+        "completion_tokens": 932,
+        "ms": 3582
       },
       {
         "tier": "ultra",
-        "prompt_tokens": 1333,
-        "completion_tokens": 620,
-        "ms": 2391
+        "prompt_tokens": 2458,
+        "completion_tokens": 1021,
+        "ms": 3085
       }
     ],
     "alerts_summary": [
       {
         "family": "tariff",
         "severity": "medium",
-        "relevance": "might_affect",
-        "headline": "New Section 301 tariffs on Chinese goods may apply to this wooden stacking toy unless it qualifies for an exemption.",
-        "action": "review",
-        "backed": 3,
-        "proposed": 3,
-        "effective_date": "2026-07-31"
-      },
-      {
-        "family": "tariff",
-        "severity": "medium",
-        "relevance": "might_affect",
-        "headline": "Your wooden stacking toy from China may face Section 301 tariffs if it falls on one of the published lists; verify the HTS code and check for exclusions.",
-        "action": "review",
-        "backed": 3,
-        "proposed": 3,
-        "effective_date": null
-      },
-      {
-        "family": "tariff",
-        "severity": "high",
         "relevance": "affects",
-        "headline": "The de minimis duty-free exemption for low-value imports from China has been suspended, so your $34 wooden toy now incurs duties and formal entry requirements.",
-        "action": "compliance_step",
-        "backed": 3,
-        "proposed": 3,
+        "headline": "The $800 de minimis duty exemption is suspended for all shipments from China, so this $34 wooden toy now incurs full duties and fees on entry.",
+        "action": "reprice",
+        "backed": 4,
+        "proposed": 4,
         "effective_date": "2025-05-02"
       },
       {
         "family": "tariff",
         "severity": "low",
         "relevance": "might_affect",
-        "headline": "The HTS chapter covering wooden stacking toys (9503) is confirmed in the current 2026 schedule, but the exact duty rate for this product is not shown in the provided sources.",
+        "headline": "Wooden rainbow stacker toy likely classifies under HTS 9503.00.00 with a free general duty rate, but classification and rate should be confirmed with a broker.",
         "action": "review",
-        "backed": 1,
-        "proposed": 2,
-        "effective_date": "2026-10-05"
+        "backed": 5,
+        "proposed": 5,
+        "effective_date": "2026-01-21"
       }
     ]
   },
   "forge": {
-    "ms": 11740,
+    "ms": 8224,
     "status": "unrun",
     "iterations": 1,
     "fact_name": "indefinite_suspension_effective_date",
@@ -157,21 +133,21 @@
       {
         "kind": "sources",
         "title": "Fetched 4 official pages with Tavily",
-        "ms": 850,
+        "ms": 1005,
         "model": null,
         "ok": null
       },
       {
         "kind": "write",
         "title": "Nemotron 3 Ultra wrote check.py: indefinite_suspension_effective_date",
-        "ms": 3829,
+        "ms": 2142,
         "model": "ultra",
         "ok": null
       },
       {
         "kind": "tests",
-        "title": "Nemotron 3 Nano wrote 3 tests",
-        "ms": 6084,
+        "title": "Nemotron 3 Nano wrote 4 tests",
+        "ms": 4189,
         "model": "nano",
         "ok": null
       },
@@ -183,34 +159,34 @@
         "ok": false
       }
     ],
-    "code_lines": 56,
-    "test_functions": 3,
+    "code_lines": 38,
+    "test_functions": 4,
     "sandbox_note": "Sandboxes are not configured: set NEBIUS_PROJECT_ID (Token Factory project settings) next to NEBIUS_API_KEY.",
     "last_output": null,
-    "llm_cost_usd": 0.00743128,
+    "llm_cost_usd": 0.006762280000000001,
     "tavily_calls": 2
   },
   "cost": {
-    "llm_usd": 0.023862480000000002,
-    "all_ultra_usd": 0.025499,
-    "saved_pct": 6.417977175575508,
+    "llm_usd": 0.026053,
+    "all_ultra_usd": 0.028569999999999998,
+    "saved_pct": 8.809940497024845,
     "by_tier": {
       "nano": {
         "calls": 1,
-        "prompt": 314,
-        "completion": 486,
-        "ms": 2870,
-        "cost": 0.00013548
+        "prompt": 1650,
+        "completion": 350,
+        "ms": 2585,
+        "cost": 0.000183
       },
       "ultra": {
         "calls": 4,
-        "prompt": 13806,
-        "completion": 3307,
-        "ms": 15027,
-        "cost": 0.023727
+        "prompt": 15856,
+        "completion": 3338,
+        "ms": 14322,
+        "cost": 0.025869999999999997
       }
     },
-    "forge_llm_usd": 0.00743128
+    "forge_llm_usd": 0.006762280000000001
   },
   "verifier": {
     "fixture_pages": 6,
@@ -379,5 +355,5 @@
       }
     ]
   },
-  "account_id": "8ea36d8c-e97b-47e5-aaa6-1ec78b4da6d0"
+  "account_id": "09b3c2af-a1b7-418e-aec0-4fe593a1b618"
 }

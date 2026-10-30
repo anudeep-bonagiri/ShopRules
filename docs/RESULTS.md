@@ -1,6 +1,6 @@
 # RESULTS
 
-Run of 2026-10-30T04:42:00Z. Rerun: `scripts/full_run.sh` (one measured cycle against the live APIs: `scripts/facts.mts`, then `scripts/honesty.py`).
+Run of 2026-10-30T05:22:34Z. Rerun: `scripts/full_run.sh` (one measured cycle against the live APIs: `scripts/facts.mts`, then `scripts/honesty.py`).
 
 ## Metrics
 
@@ -8,12 +8,12 @@ Run of 2026-10-30T04:42:00Z. Rerun: `scripts/full_run.sh` (one measured cycle ag
 | --- | --- | --- |
 | Planted misquotes rejected by the verifier (fixture) | 8 of 10 | 10 of 10 |
 | Decoy quotes accepted by the verifier (fixture) | 6 of 6 | 6 of 6 |
-| Claims backed on the live check | 10 of 11 (1 rejected and shown) | every alert carries at least one backed quote |
-| Official (.gov) source domains on the tariff rules | 5 of 5 | 5 of 5 |
-| First check wall time, 4 rules | 13.4 s | under 20 s |
-| Ingest wall time | 23.6 s | under 30 s |
-| Nemotron spend, ingest plus check | $0.0239 | under $0.05 |
-| Rule Forge | unrun, 56 lines, 3 tests, 11.7 s | tests pass in the sandbox |
+| Claims backed on the live check | 9 of 9 (0 rejected and shown) | every alert carries at least one backed quote |
+| Official (.gov) source domains on the tariff rules | 3 of 3 | 3 of 3 |
+| First check wall time, 4 rules | 16.3 s | under 20 s |
+| Ingest wall time | 24.9 s | under 30 s |
+| Nemotron spend, ingest plus check | $0.0261 | under $0.05 |
+| Rule Forge | unrun, 38 lines, 4 tests, 8.2 s | tests pass in the sandbox |
 
 ## Hard negatives (decoys that look wrong and are legitimate)
 
@@ -45,7 +45,7 @@ Run of 2026-10-30T04:42:00Z. Rerun: `scripts/full_run.sh` (one measured cycle ag
 
 | Integration | This run |
 | --- | --- |
-| Tavily Search and Extract | live, keyed mode, 12 calls |
+| Tavily Search and Extract | live, keyed mode, 13 calls |
 | Nemotron 3 Nano and Ultra on Token Factory | live, 7 calls |
 | Token Factory Sandbox | did not run (Sandboxes are not configured: set NEBIUS_PROJECT_ID (Token Factory project settings) next to NEBIUS_API_KEY.) |
 | Workspace store | postgres |
@@ -54,14 +54,14 @@ Nothing in this run was replayed, recorded, or stubbed.
 
 ## Cost
 
-Nemotron: $0.0239 for ingest plus check, $0.0074 for the forge; the same tokens on Ultra only: $0.0255; saved by routing 6%.
+Nemotron: $0.0261 for ingest plus check, $0.0068 for the forge; the same tokens on Ultra only: $0.0286; saved by routing 9%.
 
 ## What is real
 
 <!-- honesty:start -->
-In the measured run of 2026-10-30T04:42:00Z, every Tavily call (12 in all, keyed mode) and every Nemotron call (7 in all) was live against the APIs; nothing was replayed, recorded, or stubbed.
+In the measured run of 2026-10-30T05:22:34Z, every Tavily call (13 in all, keyed mode) and every Nemotron call (7 in all) was live against the APIs; nothing was replayed, recorded, or stubbed.
 The sandbox step did not run (Sandboxes are not configured: set NEBIUS_PROJECT_ID (Token Factory project settings) next to NEBIUS_API_KEY.); the forge card says the same.
-The verifier backed 10 of 11 claims on the live check and rejected 1. On the planted fixture it rejected 8 of 10 misquotes and accepted 6 of 6 decoys; the misquotes it let through are named in docs/RESULTS.md.
+The verifier backed 9 of 9 claims on the live check and rejected 0. On the planted fixture it rejected 8 of 10 misquotes and accepted 6 of 6 decoys; the misquotes it let through are named in docs/RESULTS.md.
 <!-- honesty:end -->
 
 ## History

@@ -1,6 +1,6 @@
 # Shop Rules: Devpost submission, every field
 
-> Every number below is copied from `docs/FACTS.md` (run of 2026-10-30T04:42:00Z) or listed with a reason in `docs/numbers_allowed.txt`. Before the final paste: run `scripts/facts.mts` once more if the code changed, refresh the numbers marked FACTS, and replace the video line with the YouTube link.
+> Every number below is copied from `docs/FACTS.md` (run of 2026-10-30T05:22:34Z) or listed with a reason in `docs/numbers_allowed.txt`. Before the final paste: run `scripts/facts.mts` once more if the code changed, refresh the numbers marked FACTS, and replace the video line with the YouTube link.
 
 ---
 
@@ -29,7 +29,7 @@ The product page with the de minimis alert open: the accent card, the evidence c
 | **Code** | https://github.com/anudeep-bonagiri/ShopRules |
 | **Extension** | packaged build at `extension/shop-rules-extension.zip` in the repo, loads unpacked |
 
-Numbers marked (FACTS) are copied from `docs/FACTS.md`, written by one measured run of 2026-10-30T04:42:00Z against the live APIs; the file, the script that wrote it, and the planted fixture it scores the verifier on are all in the repo.
+Numbers marked (FACTS) are copied from `docs/FACTS.md`, written by one measured run of 2026-10-30T05:22:34Z against the live APIs; the file, the script that wrote it, and the planted fixture it scores the verifier on are all in the repo.
 
 ### Inspiration
 
@@ -37,7 +37,7 @@ A solo seller on Etsy, Shopify, or Amazon is also the import compliance officer,
 
 ### What it does
 
-**The loop a seller lives in.** On any Amazon, Etsy, or Shopify listing, hover and press Alt+Shift+S. The extension reads the page (Shopify stores answer their public `.json`; JSON-LD and Open Graph otherwise) and shows a Product Stats HUD: price with its history, landed cost and margin, duty exposure with the tariff heading, weekly margin drag, and every rule that touches this product grouped as tariffs, safety, sales tax, and policy. One click watches it. From then on the seller is notified when its price moves past their threshold or when a rule changes, with a Chrome notification per alert and a badge count.
+**The loop a seller lives in.** On any Amazon, Etsy, or Shopify listing, hover and press Alt+Shift+S. The extension reads the page (Shopify stores answer their public products JSON endpoint; JSON-LD and Open Graph otherwise) and shows a Product Stats HUD: price with its history, landed cost and margin, duty exposure with the tariff heading, weekly margin drag, and every rule that touches this product grouped as tariffs, safety, sales tax, and policy. One click watches it. From then on the seller is notified when its price moves past their threshold or when a rule changes, with a Chrome notification per alert and a badge count.
 
 **Inspect and watch.** Watching reads the listing, classifies it with Nemotron 3 Nano (origin, materials, flags, and a four-digit tariff heading chosen from a curated catalog so the model cannot invent one), and seeds watch rules on official domains only: CBP, USTR, the Federal Register, CPSC, FDA, FTC, OEHHA, the revenue site of each ship-to state, and the marketplace's own policy pages. The seller can override any field (unit cost, origin, heading, materials) and the classifier never writes over it.
 
@@ -50,7 +50,7 @@ A solo seller on Etsy, Shopify, or Amazon is also the import compliance officer,
 The moment, as a judge can replay it:
 
 1. Open the demo, click "Load demo shop". A wooden stacking toy from China, a USB desk lamp with a lithium battery, and an organic cotton tee from Vietnam are watched and their tariff rules run. The toy gets 12 rules (4 tariff, 3 safety, 4 tax, 1 policy) (FACTS).
-2. Open the toy. The de minimis alert reads: "The de minimis duty-free exemption for low-value imports from China has been suspended, so your $34 wooden toy now incurs duties and formal entry requirements." Its evidence counter reads 3 of 3 backed, effective 2025-05-02. Across the four tariff rules of the first check: 11 claims proposed, 10 backed, 1 rejected and shown as rejected; every source domain was a .gov site, 5 of 5 (FACTS).
+2. Open the toy. The de minimis alert reads: "The $800 de minimis duty exemption is suspended for all shipments from China, so this $34 wooden toy now incurs full duties and fees on entry." Its evidence counter reads 4 of 4 backed, effective 2025-05-02. Across the four tariff rules of the first check: 9 claims proposed, 9 backed, none rejected, and the guardrails folded the 4 rule verdicts into 2 alerts; every source domain was a .gov site, 3 of 3 (FACTS).
 3. Click a claim. The quote is the sentence from the official notice, and the source link opens it. A rejected claim stays on the card with its label, so you can see what the model proposed and the verifier refused.
 4. Click "Forge a check". Nemotron 3 Ultra writes `check.py`, Nemotron 3 Nano writes the tests from the backed facts, a Token Factory sandbox runs them, and the forge page shows each step with its model and timing.
 5. Hover the same toy or lamp on Amazon with the extension and press Alt+Shift+S: the HUD shows the same stored result, with price history, landed cost and margin, and the duty exposure.
@@ -61,7 +61,7 @@ The moment, as a judge can replay it:
 
 In the order a check flows, each with the file that holds it:
 
-- **Extension:** `extension/`, Manifest V3, vanilla TypeScript, Shadow DOM, focus-trapped `aria-modal` HUD. Shopify detection by `window.Shopify`, the checkout meta, or `/cdn/shop/` assets; the public `.json` endpoint is preferred over scraping; every extracted field carries a confidence. One-click connect from the web app's Settings through `postMessage`; price observations posted once an hour per product; id-based notifications.
+- **Extension:** `extension/`, Manifest V3, vanilla TypeScript, Shadow DOM, focus-trapped `aria-modal` HUD. Shopify detection by `window.Shopify`, the checkout meta, or `/cdn/shop/` assets; the public products JSON endpoint is preferred over scraping; every extracted field carries a confidence. One-click connect from the web app's Settings through `postMessage`; price observations posted once an hour per product; id-based notifications.
 - **Ingest:** `apps/web/src/lib/pipeline.ts` `ingestProduct`. Tavily Extract plus the page fields; a bot wall is detected and dropped, and Tavily Search by listing URL restricted to the store supplies the indexed listing when the fetch fails. Then Nemotron 3 Nano with JSON schema output. The tariff heading is an enum over `hts-catalog.ts` (about 100 headings); a keyword matcher is the fallback and the cross-check. The general duty rate is read from hts.usitc.gov with Tavily Extract (`hts-rate.ts`).
 - **Rules:** `rules-catalog.ts`. Tariff, product safety, sales tax, marketplace policy, each with official domains, a cadence the seller can change, pause and resume, and seeds labelled as seeds. Nexus seeds for 46 jurisdictions live in `nexus-thresholds.json`.
 - **Check:** `checkRule`. Tavily Search (`include_domains` strict, `chunks_per_source`, `time_range`), Tavily Extract with the rule as the query, a content hash so unchanged sources skip the model, the rule's alert history and the price trend in the prompt, then Nemotron 3 Ultra with `RuleCheckSchema`. Scoped runs (due, all, one family) with live progress polled from a run record.
@@ -105,14 +105,14 @@ Rule Forge is also why a judge from the Coding and Agentic Engineering track see
 
 ### What we got wrong
 
-The first live demo cut a lamp's price after a duty increase: the model had been asked to compute the price and applied a target margin to the new cost on a product earning more than the target. That is why pricing is now arithmetic in `pricing.ts` with a unit test that a cost increase can never lower the price, and why the model reports facts only. The same demo classified a desk lamp as signalling apparatus at 92 percent confidence; the heading now comes from a catalog with a keyword cross-check. Rule Forge's sandbox step depends on the Token Factory project id being set on the deployment; where it is not, the forge card says "Not run" and shows the code and tests anyway (FACTS records that status for the measured run). The verifier checks that a quote exists, not that it supports the claim, so a confidently misread sentence can pass; that is why rejected claims stay visible and every source is one click away. Scored on the planted fixture it lets 2 of 10 misquotes through: a negation inserted into a 42-word quote, and two non-adjacent sentences of one page joined as if contiguous (FACTS, `docs/RESULTS.md`). The cost saving from routing is modest on a single cycle, 6 percent (FACTS), because the decision step on Ultra dominates; it grows with the Nano-heavy parts (classification, compare, skills) a seller uses day to day. Prices are list prices from third-party trackers until replaced with the invoice. Tax and marketplace-policy rules use prefer mode, so a non-official page can appear in their evidence; the domain is printed on every evidence line.
+The first live demo cut a lamp's price after a duty increase: the model had been asked to compute the price and applied a target margin to the new cost on a product earning more than the target. That is why pricing is now arithmetic in `pricing.ts` with a unit test that a cost increase can never lower the price, and why the model reports facts only. The same demo classified a desk lamp as signalling apparatus with high confidence; the heading now comes from a catalog with a keyword cross-check. Rule Forge's sandbox step depends on the Token Factory project id being set on the deployment; where it is not, the forge card says "Not run" and shows the code and tests anyway (FACTS records that status for the measured run). The verifier checks that a quote exists, not that it supports the claim, so a confidently misread sentence can pass; that is why rejected claims stay visible and every source is one click away. Scored on the planted fixture it lets 2 of 10 misquotes through: a negation inserted into a 42-word quote, and two non-adjacent sentences of one page joined as if contiguous (FACTS, `docs/RESULTS.md`). The cost saving from routing is modest on a single cycle, 9 percent (FACTS), because the decision step on Ultra dominates; it grows with the Nano-heavy parts (classification, compare, skills) a seller uses day to day. Prices are list prices from third-party trackers until replaced with the invoice. Tax and marketplace-policy rules use prefer mode, so a non-official page can appear in their evidence; the domain is printed on every evidence line.
 
 ### Accomplishments that we're proud of
 
-- 10 of 11 claims backed by the extracted source text on the first measured check, the other 1 rejected and shown, in 13.4 seconds for 4 rules, with 5 of 5 source domains on .gov (FACTS).
+- 9 of 9 claims backed by the extracted source text on the first measured check, in 16.3 seconds for 4 rules, with 3 of 3 source domains on .gov (FACTS).
 - The verifier scored on a planted fixture with a hidden answer key: 8 of 10 planted misquotes rejected and 6 of 6 decoys accepted, with the 2 it let through named on the results page (FACTS).
-- One Nemotron Nano call classified a listing into origin, HTS candidate, and the rule set in 2.9 seconds (FACTS).
-- A coding agent that produces a 56-line deterministic extractor and 3 tests for a tariff rule in 11.7 seconds (FACTS), with every step logged, and a store that survived its own outage (D-17).
+- One Nemotron Nano call classified a listing into origin, HTS candidate, and the rule set in 2.6 seconds (FACTS).
+- A coding agent that produces a 38-line deterministic extractor and 4 tests for a tariff rule in 8.2 seconds (FACTS), with every step logged, and a store that survived its own outage (D-17).
 
 ### What we learned
 

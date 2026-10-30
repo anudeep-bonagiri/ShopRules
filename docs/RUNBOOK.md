@@ -11,7 +11,7 @@ in the "See" column or off `docs/FACTS.md`; nothing from memory.
 | Time | Say | Do | See (the element every number is read from) | Fallback (Terminal B) |
 | --- | --- | --- | --- | --- |
 | 00:00 | "Shop Rules is the compliance clerk that quotes its sources. Tavily reads the official page, Nemotron decides, a verifier outside the model drops what it cannot quote." | open the home page | the empty Watchlist with the "Load demo shop" button | `scripts/rehearse.sh` beat "health" |
-| 00:15 | "Three listings a seller might have, and the first checks on the toy." | click "Load demo shop" | the three product cards appear; the toy's card shows its open-alert count (measured 2026-10-30 on the public demo: 43 s) | rehearse beat "Load demo shop" |
+| 00:15 | "Three listings a seller might have, and the first checks on the toy." | click "Load demo shop" | the three product cards appear; the toy's card shows its open-alert count (measured 2026-10-30 on the public demo after the merge: 60 s) | rehearse beat "Load demo shop" |
 | 01:00 | "The de minimis alert. The counter says how many claims the model proposed and how many the verifier backed." | open the toy, open the de minimis alert | the evidence counter on the alert card ("n of m backed"); the effective date | rehearse beat "the toy's alerts" |
 | 01:20 | "Click a claim: the quote is the sentence on the page, and the source opens." | click a claim, click its source link | the quote text and the domain on the evidence line; the official page in a new tab | the `sources` array in the alert JSON |
 | 01:40 | "A rejected claim stays on the card with its label." | point at a rejected claim if the run produced one | the "Rejected" label | the `backed: false` claim in the alert JSON |

@@ -13,11 +13,11 @@ Built for the Nebius x NVIDIA Global AI Hackathon, Personal AI track. Every deci
 
 ## How it works
 
-1. **Read.** You paste a listing URL or press Alt+Shift+S on the page. The extension reads the page (Shopify stores answer their public `.json`; JSON-LD and Open Graph otherwise) and sends the fields along; Tavily Extract reads pasted URLs, and when a marketplace answers with a bot wall, Tavily Search by listing URL supplies the indexed listing instead. Nemotron 3 Nano turns the text into a product profile: category, materials, origin, flags, and a four-digit tariff heading chosen from a curated catalog (`hts-catalog.ts`) with a keyword cross-check. The general duty rate is read from hts.usitc.gov with Tavily Extract. You can override any field; the classifier never writes over yours.
+1. **Read.** You paste a listing URL or press Alt+Shift+S on the page. The extension reads the page (Shopify stores answer their public products JSON endpoint; JSON-LD and Open Graph otherwise) and sends the fields along; Tavily Extract reads pasted URLs, and when a marketplace answers with a bot wall, Tavily Search by listing URL supplies the indexed listing instead. Nemotron 3 Nano turns the text into a product profile: category, materials, origin, flags, and a four-digit tariff heading chosen from a curated catalog (`hts-catalog.ts`) with a keyword cross-check. The general duty rate is read from hts.usitc.gov with Tavily Extract. You can override any field; the classifier never writes over yours.
 2. **Seed rules.** From the profile and your ship-to states, Shop Rules creates watch rules on official domains only: CBP, USTR, the Federal Register, trade.gov and the HTS for tariffs; CPSC, FDA, FTC, FCC and OEHHA for safety; each state's revenue site for economic nexus (46 jurisdictions seeded in `nexus-thresholds.json`); Seller Central, Etsy Help and Shopify Help for policy. Pause a rule or change its cadence on the Rules page.
 3. **Watch.** Daily and on demand (due rules, every rule, or one family, with live progress) each rule runs Tavily Search restricted to its domains, then Tavily Extract with the rule as the query. A content hash skips the model when sources have not changed. The daily run also refreshes every watched price with Tavily Extract alone and verifies nexus thresholds on the revenue sites with Tavily Map and Extract.
 4. **Decide.** Nemotron 3 Ultra reads the profile, the rule, your standing instructions, the rule's alert history and price trend, and the source excerpts, and reports facts: does this touch the product, how severe, effective when, the duty change in points, the steps. It never computes a price.
-5. **Verify.** A verifier outside the model checks every quote against the extracted text. Deterministic guardrails then audit the verdict: numbers must be in a backed quote (a quote that moves a rate from 7.5 to 25 percent is 17.5 points even if the model wrote 25), dates must be plausible, the action must fit the rule, the quotes must be about this product and not another heading or country on the same page, repeats are dropped. Every adjustment is shown on the alert, with the source trail of Tavily calls. The verifier's match is a normalized substring, then six-word shingles at 80 percent with every number in the quote required verbatim; elided quotes are checked part by part; it is scored on a planted fixture (`seed/generate.mts`) in every facts run.
+5. **Verify.** A verifier outside the model checks every quote against the extracted text. Deterministic guardrails then audit the verdict: numbers must be in a backed quote (a quote that moves a rate from one level to another is the difference of the two, even if the model wrote the new level), dates must be plausible, the action must fit the rule, the quotes must be about this product and not another heading or country on the same page, repeats are dropped. Every adjustment is shown on the alert, with the source trail of Tavily calls. The verifier's match is a normalized substring, then six-word shingles at 80 percent with every number in the quote required verbatim; elided quotes are checked part by part; it is scored on a planted fixture (`seed/generate.mts`) in every facts run.
 6. **Reprice.** `pricing.ts` applies the duty to the dutiable share of landed cost, holds your current margin, absorbs tiny moves, and can never lower a price after a cost increase. The web app and the extension render the same stored result.
 7. **Act and learn.** Approve the step or dismiss the alert with a reason. The reason becomes a standing instruction (written by Nano) that future checks follow; edit or delete it any time. A cost receipt shows the Tavily layer and the model layer side by side.
 8. **Forge a check as code.** For any rule, Rule Forge has Ultra write a short Python extractor, Nano write tests from the backed facts, and a Nebius Token Factory Sandbox run them with networking off.
@@ -33,7 +33,7 @@ Built for the Nebius x NVIDIA Global AI Hackathon, Personal AI track. Every deci
 | Storage | Postgres: one JSON document per workspace in a `workspaces` row, read in one query, written back with a compare-and-swap version check (tables in `apps/web/supabase/store.sql`). Vercel Blob remains an alternative backend behind `BLOB_READ_WRITE_TOKEN` (versions written create-only, so writes are compare-and-swap); a file-backed store runs the app offline in development |
 | Extension | Chrome Manifest V3, vanilla TypeScript bundled with esbuild, Shadow DOM overlay |
 | Delivery | Telegram bot (optional) and the extension badge |
-| Scheduling | Vercel Cron daily hitting `/api/cron/check`: price refresh, nexus verification, then due rules |
+| Scheduling | Vercel Cron daily hitting the check route (`apps/web/src/app/api/cron/check/route.ts`): price refresh, nexus verification, then due rules |
 
 ## Run it
 
@@ -62,7 +62,7 @@ Then:
 npm run dev
 ```
 
-Without any keys the app starts in demo mode: a local file store under `apps/web/.sr-data`, Nemotron answers from recorded fixtures, Tavily results from recorded official excerpts. The Watchlist says so. Checks, the verifier, the guardrails, pricing, and the UI are the real code, so "Load demo shop" works offline.
+Without any keys the app starts in demo mode: a local file store under the app's .sr-data folder, Nemotron answers from recorded fixtures, Tavily results from recorded official excerpts. The Watchlist says so. Checks, the verifier, the guardrails, pricing, and the UI are the real code, so "Load demo shop" works offline.
 
 Checks that do not need keys:
 
@@ -137,6 +137,9 @@ docs/                  FACTS, RESULTS, TASKS (one need per sponsor), RUNBOOK, no
 Everything on the public demo is a live call: Tavily, Nemotron on Token Factory, and the sandbox when `NEBIUS_PROJECT_ID` is set; nothing there is replayed. Without keys, a development checkout runs in demo mode (a local file store, Nemotron answers from recorded fixtures, Tavily results from recorded official excerpts) and the Watchlist says so. The "Load demo shop" button adds three listings whose page fields are supplied the way the extension supplies them; the checks it runs are real. The measured numbers are in [docs/FACTS.md](docs/FACTS.md) and [docs/RESULTS.md](docs/RESULTS.md), what is not built is in [docs/not-built.md](docs/not-built.md), and every claim this README makes is audited in [docs/CLAIMS_AUDIT.md](docs/CLAIMS_AUDIT.md).
 
 <!-- honesty:start -->
+In the measured run of 2026-10-30T05:22:34Z, every Tavily call (13 in all, keyed mode) and every Nemotron call (7 in all) was live against the APIs; nothing was replayed, recorded, or stubbed.
+The sandbox step did not run (Sandboxes are not configured: set NEBIUS_PROJECT_ID (Token Factory project settings) next to NEBIUS_API_KEY.); the forge card says the same.
+The verifier backed 9 of 9 claims on the live check and rejected 0. On the planted fixture it rejected 8 of 10 misquotes and accepted 6 of 6 decoys; the misquotes it let through are named in docs/RESULTS.md.
 <!-- honesty:end -->
 
 ## Not built
