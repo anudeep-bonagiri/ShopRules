@@ -97,7 +97,8 @@ export async function tavilySearch(params: TavilySearchParams, meter?: Meter): P
   if (params.max_age_hours) body.max_age_hours = params.max_age_hours;
   if (params.include_domains?.length) {
     body.include_domains = params.include_domains.slice(0, 12);
-    if (params.include_domains_mode) body.include_domains_mode = params.include_domains_mode;
+    // The API spells the hard filter "restrict"; the catalog calls it "strict".
+    if (params.include_domains_mode) body.include_domains_mode = params.include_domains_mode === "strict" ? "restrict" : params.include_domains_mode;
   }
   if (params.exclude_domains?.length) body.exclude_domains = params.exclude_domains;
   if (params.chunks_per_source && depth !== "ultra-fast") body.chunks_per_source = params.chunks_per_source;
