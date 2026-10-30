@@ -13,6 +13,7 @@ import {
   listSkills,
   newId,
   findProductByUrl,
+  takeConflicts,
   type AccountRow,
   type AlertRow,
   type ProductRow,
@@ -93,6 +94,7 @@ async function recordRun(account: AccountRow, productId: string | null, kind: st
       llm_cost_usd: llmCost(meter),
       all_ultra_cost_usd: allUltraCost(meter),
       duration_ms: Date.now() - meter.started_at,
+      conflicts: takeConflicts(),
     });
   } catch (err) {
     console.error("[shop-rules] run record failed", err);
@@ -115,10 +117,100 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
 // 1. Ingest a listing: Tavily Extract reads the page, Nemotron Nano classifies it,
 //    the catalog seeds the watch rules.
 
-export async function ingestProduct(account: AccountRow, rawUrl: string, page?: PageFields): Promise<{ product: ProductRow; rules: RuleRow[]; meter: Meter; existing: boolean }> {
+export interface IngestOptions {
+  /** Client-chosen id so the form can poll GET /api/runs/[id] for the three-step progress. */
+  runId?: string;
+}
+
+function ingestProgress(account: AccountRow, runId: string | undefined) {
+  const valid = runId && /^[A-Za-z0-9_-]{8,64}$/.test(runId) ? runId : null;
+  const run: CheckRunRecord | null = valid
+    ? {
+        id: valid,
+        account_id: account.id,
+        product_id: "",
+        kind: "ingest",
+        scope: "all",
+        status: "running",
+        total: 3,
+        done: 0,
+        current: [],
+        items: [],
+        steps: [
+          { key: "read", label: "Reading listing", status: "active" },
+          { key: "classify", label: "Classifying", status: "queued" },
+          { key: "seed", label: "Seeding rules", status: "queued" },
+        ],
+        conflicts: 0,
+        started_at: new Date().toISOString(),
+        finished_at: null,
+      }
+    : null;
+  const save = async () => {
+    if (!run) return;
+    try {
+      await saveCheckRun(run);
+    } catch (err) {
+      console.error("[shop-rules] ingest progress write failed", err instanceof Error ? err.message : err);
+    }
+  };
+  return {
+    run,
+    start: () => save(),
+    step: async (key: "read" | "classify" | "seed", detail?: string) => {
+      if (!run?.steps) return;
+      for (const s of run.steps) {
+        if (s.status === "active") s.status = "done";
+        if (s.key === key) {
+          s.status = "active";
+          if (detail) s.detail = detail;
+        }
+      }
+      run.done = run.steps.filter((s) => s.status === "done").length;
+      await save();
+    },
+    finish: async (productId: string) => {
+      if (!run) return;
+      if (run.steps) for (const s of run.steps) if (s.status !== "error") s.status = "done";
+      run.done = run.total;
+      run.product_id = productId;
+      run.status = "done";
+      run.finished_at = new Date().toISOString();
+      await save();
+    },
+    fail: async (message: string) => {
+      if (!run) return;
+      if (run.steps) for (const s of run.steps) if (s.status === "active") s.status = "error";
+      run.status = "failed";
+      run.error = message.slice(0, 300);
+      run.finished_at = new Date().toISOString();
+      await save();
+    },
+  };
+}
+
+export async function ingestProduct(account: AccountRow, rawUrl: string, page?: PageFields, opts: IngestOptions = {}): Promise<{ product: ProductRow; rules: RuleRow[]; meter: Meter; existing: boolean }> {
+  const progress = ingestProgress(account, opts.runId);
+  try {
+    const result = await ingestProductInner(account, rawUrl, page, progress);
+    await progress.finish(result.product.id);
+    return result;
+  } catch (err) {
+    await progress.fail(err instanceof Error ? err.message : String(err));
+    throw err;
+  }
+}
+
+async function ingestProductInner(
+  account: AccountRow,
+  rawUrl: string,
+  page: PageFields | undefined,
+  progress: ReturnType<typeof ingestProgress>,
+): Promise<{ product: ProductRow; rules: RuleRow[]; meter: Meter; existing: boolean }> {
   const url = normalizeListingUrl(rawUrl);
   const existing = await findProductByUrl(account.id, url);
   if (existing) return { product: existing, rules: await listRules(existing.id, account.id), meter: newMeter(), existing: true };
+  await progress.start();
 
   const meter = newMeter();
   // The extension can see Shopify stores on custom domains that the URL alone does not reveal.
@@ -146,8 +238,12 @@ export async function ingestProduct(account: AccountRow, rawUrl: string, page?: 
 
   const combined = `${pageText}\n\n${extracted}`.trim();
   if (combined.length < 40) {
-    throw new ApiError(422, `Could not read that listing${extractError ? ` (${extractError})` : ""}. Add it from the extension, which sends the page fields along.`);
+    throw new ApiError(422, `Could not read that listing${extractError ? ` (${extractError})` : ""}. The store may block readers; open the page and add it from the extension, which sends the page fields along.`);
   }
+  if (!page && !/\$\s?\d|price|add to cart|buy now|\b(usd|eur|gbp|cad)\b/i.test(combined)) {
+    throw new ApiError(422, "That page does not look like a product listing (no price or buy button found). Paste the URL of one product.");
+  }
+  await progress.step("classify", `${Math.round(combined.length / 1000)}k characters read`);
 
   const classified = await chatJSON(
     "nano",
@@ -181,6 +277,7 @@ export async function ingestProduct(account: AccountRow, rawUrl: string, page?: 
   const currency = profile.currency ?? page?.currency ?? (price != null ? "USD" : null);
   const imageUrl = page?.image ?? firstImage(extracted);
 
+  await progress.step("seed", `${hts.candidates[0]?.code ? `HS ${hts.candidates[0].code}` : "classified"}`);
   const states = account.settings?.ship_to_states?.length ? account.settings.ship_to_states : ["TX", "CA", "NY", "FL"];
   const specs: RuleSpec[] = buildRules(profile, marketplace, states);
   const bundle = await insertProductBundle(
@@ -278,6 +375,7 @@ export async function runChecks(account: AccountRow, product: ProductRow, opts: 
     id: opts.runId && /^[A-Za-z0-9_-]{8,64}$/.test(opts.runId) ? opts.runId : newId(),
     account_id: account.id,
     product_id: product.id,
+    kind: "check",
     scope,
     status: "running",
     total: batch.length,

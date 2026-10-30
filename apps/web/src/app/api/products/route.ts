@@ -17,12 +17,12 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const account = await currentAccount();
-    const body = await readJson<{ url?: string; page?: PageFields & { materials?: string[] | string } }>(req);
+    const body = await readJson<{ url?: string; page?: PageFields & { materials?: string[] | string }; run_id?: string }>(req);
     if (!body.url) throw new ApiError(400, "url is required");
     const products = await listProducts(account.id);
     if (products.length >= 25) throw new ApiError(429, "This workspace watches 25 products already. Remove one first.");
     const page = body.page && typeof body.page === "object" ? sanitizePage(body.page) : undefined;
-    const result = await ingestProduct(account, body.url, page);
+    const result = await ingestProduct(account, body.url, page, { runId: typeof body.run_id === "string" ? body.run_id : undefined });
     return json({ product: result.product, rules: result.rules, meter: result.meter, existing: result.existing }, { status: result.existing ? 200 : 201 });
   } catch (err) {
     return fail(err);

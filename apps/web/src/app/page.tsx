@@ -1,8 +1,7 @@
 "use client";
 
-import { Banner, Button, TextField } from "@shopify/polaris";
+import { Banner, Button } from "@shopify/polaris";
 import NextLink from "next/link";
-import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { api, timeAgo, useApi } from "@/lib/client";
 import type { AccountRow, AlertRow, ForgeRow, ProductRow, RuleRow } from "@/lib/db";
@@ -30,6 +29,7 @@ import {
   weeklyDrag,
   type Tone,
 } from "@/components/stitch";
+import { WatchForm } from "@/components/WatchForm";
 
 type Health = { ok: boolean; tavily_mode: string; nemotron_configured: boolean; storage_configured: boolean };
 type Rule = RuleRow & { product_title: string };
@@ -37,8 +37,6 @@ type Family = "all" | "tariff" | "tax" | "safety" | "policy";
 const FAMILIES: Family[] = ["all", "tariff", "tax", "safety", "policy"];
 
 export default function WatchlistPage() {
-  const router = useRouter();
-  const [url, setUrl] = useState("");
   const [busy, setBusy] = useState<"add" | "demo" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -79,20 +77,6 @@ export default function WatchlistPage() {
     products.refresh();
     alerts.refresh();
     rules.refresh();
-  }
-
-  async function addListing() {
-    if (!url.trim()) return;
-    setBusy("add");
-    setError(null);
-    try {
-      const r = await api<{ product: ProductRow; existing: boolean }>("/api/products", { method: "POST", json: { url: url.trim() } });
-      router.push(`/products/${r.product.id}`);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(null);
-    }
   }
 
   async function loadDemo() {
@@ -202,27 +186,18 @@ export default function WatchlistPage() {
       </div>
 
       {productCount > 0 ? (
-        <SrCard className="sr-row sr-row--wrap" style={{ padding: 10, gap: 8 }}>
-          <div className="sr-grow" style={{ minWidth: 240 }}>
-            <TextField
-              label="Listing URL"
-              labelHidden
-              value={url}
-              onChange={setUrl}
-              autoComplete="off"
-              placeholder="Watch another listing: paste an Etsy, Shopify, or Amazon URL"
-              clearButton
-              onClearButtonClick={() => setUrl("")}
-              connectedRight={
-                <Button variant="primary" onClick={addListing} loading={busy === "add"} disabled={!url.trim() || busy === "demo"}>
-                  Watch
-                </Button>
-              }
-            />
-          </div>
-          <Button variant="plain" onClick={loadDemo} loading={busy === "demo"} disabled={busy === "add"}>
-            Load demo shop
-          </Button>
+        <SrCard style={{ padding: 10 }}>
+          <WatchForm
+            compact
+            placeholder="Watch another listing: paste an Etsy, Shopify, or Amazon URL"
+            buttonLabel="Watch"
+            disabled={busy === "demo"}
+            aside={
+              <Button variant="plain" onClick={loadDemo} loading={busy === "demo"}>
+                Load demo shop
+              </Button>
+            }
+          />
         </SrCard>
       ) : (
         <SrCard className="sr-stack">
@@ -232,24 +207,10 @@ export default function WatchlistPage() {
               Paste an Etsy, Shopify, or Amazon listing URL. Shop Rules reads the page, works out what the product is, and starts watching the duty, safety, tax, and policy rules that touch it.
             </p>
           </div>
-          <TextField
-            label="Listing URL"
-            labelHidden
-            value={url}
-            onChange={setUrl}
-            autoComplete="off"
-            placeholder="https://www.etsy.com/listing/..."
-            clearButton
-            onClearButtonClick={() => setUrl("")}
-            connectedRight={
-              <Button variant="primary" onClick={addListing} loading={busy === "add"} disabled={!url.trim() || busy === "demo"}>
-                Watch product
-              </Button>
-            }
-          />
+          <WatchForm placeholder="https://www.etsy.com/listing/..." buttonLabel="Watch product" disabled={busy === "demo"} />
           <div className="sr-row sr-row--between sr-row--wrap">
             <span className="sr-xs">Or add the page you are on with the Chrome extension.</span>
-            <Button variant="plain" onClick={loadDemo} loading={busy === "demo"} disabled={busy === "add"}>
+            <Button variant="plain" onClick={loadDemo} loading={busy === "demo"}>
               Load demo shop
             </Button>
           </div>

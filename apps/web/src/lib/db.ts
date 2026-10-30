@@ -81,6 +81,8 @@ export interface RunRow {
   llm_cost_usd: number;
   all_ultra_cost_usd: number;
   duration_ms: number;
+  /** Compare-and-swap retries seen while this run was writing. */
+  conflicts?: number;
   created_at: string;
 }
 
@@ -184,10 +186,27 @@ const accountDir = (id: string) => `accounts/${id}/`;
 const legacyPath = (id: string) => `accounts/${id}.json`;
 const tokenPath = (token: string) => `tokens/${token}.json`;
 
-function versionName(id: string): string {
-  const stamp = String(Date.now()).padStart(14, "0");
-  const rand = Math.random().toString(36).slice(2, 6);
-  return `${accountDir(id)}${stamp}-${rand}.json`;
+// Version files are named by the document version so a write is create-only:
+// two writers that both read version N and try to create v(N+1) cannot both
+// succeed, which is the compare-and-swap that stops silent lost updates. The
+// "v" prefix sorts after the legacy "<timestamp>-<rand>.json" names, so the
+// newest version is still the lexicographically last blob in the folder.
+function versionName(id: string, version: number): string {
+  return `${accountDir(id)}v${String(version).padStart(12, "0")}.json`;
+}
+
+// Conflicts seen by this server instance since the last run record was written.
+let conflictCounter = 0;
+export function takeConflicts(): number {
+  const n = conflictCounter;
+  conflictCounter = 0;
+  return n;
+}
+
+class WriteConflict extends Error {
+  constructor(id: string, version: number) {
+    super(`Workspace ${id} version ${version} was written by someone else`);
+  }
 }
 
 async function readBlob<T>(pathOrUrl: string): Promise<T | null> {
@@ -226,10 +245,20 @@ async function loadWorkspace(id: string): Promise<Workspace | null> {
   return readBlob<Workspace>(legacyPath(id));
 }
 
-async function writeWorkspace(id: string, ws: Workspace): Promise<void> {
+async function writeWorkspace(id: string, ws: Workspace, expectedVersion: number): Promise<void> {
   requireDb();
-  ws.version = (ws.version ?? 0) + 1;
-  await put(versionName(id), JSON.stringify(ws), { ...ACCESS, addRandomSuffix: false, contentType: "application/json", cacheControlMaxAge: 0 });
+  const next = expectedVersion + 1;
+  const name = versionName(id, next);
+  ws.version = next;
+  try {
+    // No allowOverwrite: the store refuses the put when v(next) already exists.
+    await put(name, JSON.stringify(ws), { ...ACCESS, addRandomSuffix: false, allowOverwrite: false, contentType: "application/json", cacheControlMaxAge: 0 });
+  } catch (err) {
+    ws.version = expectedVersion;
+    const exists = (await listVersions(id)).some((v) => v.pathname === name);
+    if (exists) throw new WriteConflict(id, next);
+    throw err;
+  }
   void pruneVersions(id).catch(() => undefined);
 }
 
@@ -240,19 +269,27 @@ async function pruneVersions(id: string): Promise<void> {
   await del(stale.map((v) => v.url));
 }
 
+// Read, apply, write-if-unchanged. On a conflict the function re-reads the
+// newest version and applies `fn` again, up to 5 times with jitter, so a cron
+// run, a user check, and a run record can never overwrite each other silently.
 async function mutate<T>(accountId: string, fn: (ws: Workspace) => T | Promise<T>): Promise<T> {
   let lastErr: unknown = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 5; attempt++) {
     try {
       const ws = await loadWorkspace(accountId);
       if (!ws) throw new Error(`Workspace ${accountId} not found`);
+      const seen = ws.version ?? 0;
       const result = await fn(ws);
-      await writeWorkspace(accountId, ws);
+      await writeWorkspace(accountId, ws, seen);
       return result;
     } catch (err) {
       lastErr = err;
       if (err instanceof Error && /not found/i.test(err.message)) throw err;
-      await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
+      if (err instanceof WriteConflict) {
+        conflictCounter += 1;
+        console.warn("[shop-rules] write conflict, retrying", err.message);
+      }
+      await new Promise((r) => setTimeout(r, 120 * (attempt + 1) + Math.random() * 200));
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error("Workspace write failed");
@@ -277,7 +314,7 @@ export async function getOrCreateAccount(id: string): Promise<AccountRow> {
     created_at: now(),
   };
   const fresh: Workspace = { version: 0, account, products: [], rules: [], alerts: [], runs: [], skills: [], prices: [] };
-  await writeWorkspace(id, fresh);
+  await writeWorkspace(id, fresh, fresh.version ?? 0);
   await put(tokenPath(account.token), JSON.stringify({ account_id: id }), { ...ACCESS, addRandomSuffix: false, contentType: "application/json", cacheControlMaxAge: 0 });
   return account;
 }
@@ -511,11 +548,19 @@ export async function alertExistsForRuleHash(ruleId: string, hash: string, accou
 export type CheckScope = "all" | "due" | "tariff" | "safety" | "tax" | "policy";
 export type CheckItemStatus = "queued" | "checking" | "clear" | "unchanged" | "alert" | "error";
 
+export type IngestStepKey = "read" | "classify" | "seed";
+
 export interface CheckRunRecord {
   id: string;
   account_id: string;
+  /** Empty while an ingest has not created the product yet. */
   product_id: string;
+  kind: "check" | "ingest";
   scope: CheckScope;
+  /** Ingest only: Reading listing, Classifying, Seeding rules. */
+  steps?: Array<{ key: IngestStepKey; label: string; status: "queued" | "active" | "done" | "error"; detail?: string }>;
+  /** Set when the run failed, so the poller can show the reason even if the request itself was lost. */
+  error?: string | null;
   status: "running" | "done" | "failed";
   total: number;
   done: number;
